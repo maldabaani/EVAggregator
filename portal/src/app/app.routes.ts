@@ -17,4 +17,9 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/tariffs/tariff-builder/tariff-builder.component').then((m) => m.TariffBuilderComponent),
   },
+  {
+    path: 'cost-dashboard',
+    loadComponent: () =>
+      import('./features/cost-dashboard/cost-dashboard.component').then((m) => m.CostDashboardComponent),
+  },
 ];

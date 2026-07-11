@@ -107,6 +107,23 @@ and `backend/tests/integration/` for detail:
    `asyncio.run(...)`, which fails from inside a test already running in
    pytest-asyncio's event loop. Fixed with `asyncio.to_thread(...)`.
 
+## Cost allocation dashboard (Task 4.4, completed)
+
+Task 4.4 originally shipped a backend-only service (`CostReportService`) with
+no Angular UI to display it — unlike Task 1.3 (partners) and Task 3.1
+(tariffs), which both have real `portal/src/app/features/` components. This
+is now closed:
+
+- **Backend**: `GET /admin/teams/{team_id}/cost-report` and
+  `.../cost-report/csv`, the first endpoints ever exposing
+  `CostReportService`.
+- **Portal**: `features/cost-dashboard` — stat tiles (sessions, energy,
+  total cost, avg. cost/session), a driver/site group-by toggle, a ranked
+  table with per-row cost-share meters, an incomplete-rollup-data warning
+  banner, and CSV export. Built to the palette/mark specs in the `dataviz`
+  design-system reference (`--accent`/`--track` meter fill, status-warning
+  banner styling), not ad hoc colors.
+
 ## Known gaps (not yet addressed)
 
 - **PSP**: no real Stripe account behind `StripePaymentProvider`, and no
@@ -118,9 +135,5 @@ and `backend/tests/integration/` for detail:
   been run live against all of them at once and driven over real HTTP.
 - **No observability, secrets manager, or deployment infra** (out of scope
   for this phase).
-- **Portal (Angular)**: Task 4.4's "B2B corporate cost allocation dashboard"
-  only got a backend service (`CostReportService`) — no Angular dashboard UI
-  was ever built to display it, unlike Task 1.3 (partners) and Task 3.1
-  (tariffs), which both have `portal/src/app/features/` components.
 
 See PR #1 and the commit history for the full narrative.

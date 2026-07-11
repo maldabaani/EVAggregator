@@ -22,6 +22,7 @@ to combine them on the same hypertable under any ordering, which is why
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import asyncpg
@@ -63,8 +64,13 @@ def test_schema_migration_applies_cleanly_with_existing_seed_data():
 @requires_timescaledb
 async def test_rls_fails_closed_without_tenant_context_and_isolates_tenants():
     cfg = _alembic_config()
-    command.downgrade(cfg, "base")
-    command.upgrade(cfg, "head")
+    # `command.upgrade`/`command.downgrade` run env.py's async migrations via
+    # their own internal `asyncio.run(...)` (see alembic/env.py) — calling
+    # them directly from this already-async test raises "asyncio.run()
+    # cannot be called from a running event loop". Running them in a thread
+    # gives them a loop-free context to create their own event loop in.
+    await asyncio.to_thread(command.downgrade, cfg, "base")
+    await asyncio.to_thread(command.upgrade, cfg, "head")
 
     app_dsn = settings.database_url.replace("+asyncpg", "")
     admin_dsn = settings.migration_database_url.replace("+asyncpg", "")
@@ -110,4 +116,4 @@ async def test_rls_fails_closed_without_tenant_context_and_isolates_tenants():
         assert tenant_b_rows == []
     finally:
         await app_conn.close()
-        command.downgrade(cfg, "base")
+        await asyncio.to_thread(command.downgrade, cfg, "base")

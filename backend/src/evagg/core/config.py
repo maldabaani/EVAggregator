@@ -41,5 +41,10 @@ class Settings(BaseSettings):
 
     carbon_intensity_cache_ttl_seconds: int = 15 * 60
 
+    # Resolved via secrets manager at deploy time; this default is dev-only
+    # and only works against Stripe's test mode.
+    stripe_api_key: str = "sk_test_dev_only_replace_me"
+    stripe_base_url: str = "https://api.stripe.com/v1"
+
 
 settings = Settings()

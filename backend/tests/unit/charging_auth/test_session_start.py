@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
 
-import jwt
 import pytest
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from evagg.billing.payment_methods import DIRECT_CARD, InMemoryPaymentMethodStore, PaymentMethod
@@ -13,21 +10,9 @@ from evagg.charging_auth.autocharge import InMemoryAutochargeMacStore
 from evagg.charging_auth.plug_and_charge import InMemoryEmaidDriverMap, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import sign_qr_token
 from evagg.charging_auth.session_start import SessionStartService
+from charging_auth.x509_test_helpers import make_ca_cert, make_leaf_cert, pem
 
 SECRET = "shared-gateway-secret"
-TRUSTED_ISSUER = "https://oem-ca.example.com"
-
-
-def _pem(key, private: bool) -> str:
-    if private:
-        return key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        ).decode()
-    return key.public_bytes(
-        encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode()
 
 
 @pytest.mark.asyncio
@@ -62,16 +47,14 @@ async def test_all_three_methods_correctly_hook_up_default_payment_method():
     assert autocharge_result.payment_method == expected_methods[autocharge_driver_id]
 
     # Plug & Charge
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca_cert = make_ca_cert(ca_key)
+    vehicle_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     emaid_map = InMemoryEmaidDriverMap()
     emaid_map.register("EMAID-XYZ", plug_and_charge_driver_id)
-    validator = PlugAndChargeValidator({TRUSTED_ISSUER: _pem(private_key.public_key(), private=False)}, emaid_map)
-    cert = jwt.encode(
-        {"iss": TRUSTED_ISSUER, "emaid": "EMAID-XYZ", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)},
-        _pem(private_key, private=True),
-        algorithm="RS256",
-    )
-    pnc_result = await service.start_via_plug_and_charge(cert, "CP-003", validator)
+    validator = PlugAndChargeValidator([pem(ca_cert)], emaid_map)
+    cert = make_leaf_cert(ca_key, ca_cert, vehicle_key.public_key(), emaid="EMAID-XYZ")
+    pnc_result = await service.start_via_plug_and_charge(pem(cert), "CP-003", validator)
     assert pnc_result.payment_method == expected_methods[plug_and_charge_driver_id]
 
     # All three resolved a different driver's own default method, never mixed up.

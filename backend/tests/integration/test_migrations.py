@@ -6,12 +6,18 @@ Verified manually against a real local Postgres 16 during development (see
 commit history): fresh-DB apply, downgrade, fail-closed zero-row reads with no
 tenant context, and cross-tenant isolation between two seeded organizations
 all behaved as asserted below. TimescaleDB-specific steps (hypertable
-conversion, continuous aggregate, retention/compression) require the
-`timescaledb` extension and are annotated accordingly — they were reviewed
-against the Timescale API but could not be executed in the sandbox that wrote
-this suite (no TimescaleDB extension available locally, and container image
-pulls were blocked by network policy). Runs for real the first time this
-suite executes in CI against the `timescale/timescaledb` docker-compose image.
+conversion, continuous aggregate, retention) require the `timescaledb`
+extension and are annotated accordingly — they were reviewed against the
+Timescale API but could not be executed in the sandbox that wrote this suite
+(no TimescaleDB extension available locally, and container image pulls were
+blocked by network policy). Ran for real the first time this suite executed
+in CI against the `timescale/timescaledb` docker-compose image, which
+surfaced three real migration bugs no local review could have caught: a
+transaction-block restriction on continuous aggregate creation, and two
+rounds of RLS/TimescaleDB-feature conflicts (continuous aggregates and RLS
+have an orderable conflict; RLS and compression do not — TimescaleDB refuses
+to combine them on the same hypertable under any ordering, which is why
+`meter_value`/`status_log` no longer use compression at all).
 """
 
 from __future__ import annotations

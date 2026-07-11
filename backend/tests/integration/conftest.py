@@ -15,9 +15,14 @@ TimescaleDB is the one exception: it isn't in Ubuntu's archive at all, only
 in Timescale's own apt repo and the `timescale/timescaledb` Docker image,
 both of which this sandbox's network policy blocks (same policy that blocks
 Docker Hub generally). `test_migrations.py`'s TimescaleDB-dependent cases
-(hypertable conversion, continuous aggregates, retention/compression) can
-only run for real in CI, against the docker-compose service declared in
-`.github/workflows/backend-ci.yml`.
+(hypertable conversion, continuous aggregates, retention) can only run for
+real in CI, against the docker-compose service declared in
+`.github/workflows/backend-ci.yml` — and that was worth it: real TimescaleDB
+caught three migration bugs no amount of local testing against bare Postgres
+could have (a transaction-block restriction on continuous aggregate
+creation, and two rounds of RLS-vs-TimescaleDB-feature conflicts that ended
+in dropping compression on RLS-protected tables entirely, since TimescaleDB
+doesn't allow the two to coexist on the same hypertable at all).
 """
 
 from __future__ import annotations

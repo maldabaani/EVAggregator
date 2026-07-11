@@ -9,9 +9,10 @@ the `meter_value_hourly` continuous aggregate per Task 6.2:
 - Chunk interval starts at 1 day per the doc's own note to "tune after real
   volume data from Task 2.2's load test" — revisit once production write
   volume is known.
-- Retention and compression (also Task 6.2) are configured in a later
-  migration, timescale_compression_retention, *after* RLS is enabled — see
-  that migration's docstring for why the ordering is split three ways.
+- Retention (also Task 6.2) is configured in a later migration,
+  timescale_retention, *after* RLS is enabled — see that migration's
+  docstring for why the ordering is split three ways, and why compression
+  (originally also planned here) was dropped for these two tables entirely.
 
 Runs *before* the RLS migration (cb7ac4e49b9a), not after: TimescaleDB
 refuses to create a continuous aggregate on a hypertable that already has

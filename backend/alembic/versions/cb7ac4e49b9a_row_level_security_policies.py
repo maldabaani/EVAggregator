@@ -18,14 +18,14 @@ This migration reads its table list from `evagg.scripts.audit_rls`, the same
 module used by the CI audit script, so there is exactly one source of truth
 for "which tables must have a tenant-isolation policy."
 
-Runs *between* the two TimescaleDB migrations (after 8679657fe757's
-hypertable + continuous aggregate setup, before
-timescale_compression_retention's compression/retention policies), not
-before or after both: TimescaleDB refuses to create a continuous aggregate
-on a hypertable that already has RLS enabled, so RLS can't come first — and
-separately refuses to enable RLS on a hypertable that already has
-compression ("columnstore") turned on, so RLS can't come after that either.
-This is the one slot that satisfies both real constraints.
+Runs *after* the TimescaleDB hypertable + continuous aggregate migration
+(8679657fe757), not before: TimescaleDB refuses to create a continuous
+aggregate on a hypertable that already has RLS enabled, so the continuous
+aggregate has to exist first. (A third migration, timescale_retention, adds
+retention afterward — TimescaleDB separately refuses to let RLS and
+compression coexist on the same hypertable at all, which is why compression
+was dropped for `meter_value`/`status_log` rather than reordered around;
+see that migration's docstring.)
 
 Revision ID: cb7ac4e49b9a
 Revises: 8679657fe757

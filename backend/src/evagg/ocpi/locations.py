@@ -1,7 +1,7 @@
-"""In-memory location store used by the router/tests. Production reads from
-the materialized read model synced from internal charger/site tables (Task
-1.2) rather than this — this module exists so Task 1.1's version-negotiation
-and shim-enforcement work is testable without that dependency yet existing.
+"""Location read model, synced from internal charger/site tables (Task 1.2's
+`LocationSyncService`) rather than queried live from OCPP state on every
+roaming call. Task 1.1 uses the same store, seeded directly, before that sync
+mechanism existed.
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ class LocationRepository(Protocol):
 
     async def list_all(self) -> list[OCPILocation]: ...
 
+    async def upsert(self, location: OCPILocation) -> None: ...
+
 
 class InMemoryLocationRepository:
     def __init__(self, locations: list[OCPILocation] | None = None) -> None:
@@ -29,3 +31,6 @@ class InMemoryLocationRepository:
 
     async def list_all(self) -> list[OCPILocation]:
         return list(self._locations.values())
+
+    async def upsert(self, location: OCPILocation) -> None:
+        self._locations[location.id] = location

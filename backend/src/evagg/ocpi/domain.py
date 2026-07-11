@@ -29,6 +29,10 @@ class OCPILocation(BaseModel):
     country: str
     coordinates: OCPIGeoLocation
     last_updated: datetime
+    # Simplified single-EVSE-per-location model (Task 1.2's read model sync);
+    # the full spec nests a list of EVSEs, each with its own connector array —
+    # a straightforward extension of this same sync mechanism, not a redesign.
+    evse_status: str | None = None
 
 
 class OCPITariff(BaseModel):

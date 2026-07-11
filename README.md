@@ -54,7 +54,48 @@ flutter run
 
 ## Status
 
-Epics 1-4 and 6 complete (OCPI roaming, OCPP gateway, tariff/billing engine,
-fleet management, DB/infra + multi-tenancy). Epic 5 (Flutter driver app) is
-in progress — live map discovery (Task 5.1) is done. See the task tracker /
-commit history for detail on each task.
+All 6 epics / 23 backlog tasks are complete: OCPI roaming, OCPP gateway,
+tariff/billing engine, multi-tenant fleet management, the DB/infra +
+multi-tenancy foundation, and the Flutter driver app (live map, QR/autocharge/
+Plug & Charge session start, live session tracking, and the analytics
+dashboard).
+
+Since the backlog was finished, the following hardening passed a real CI run
+(GitHub Actions, not just local unit tests):
+
+- **Payments**: `StripePaymentProvider`, a real httpx-based `PaymentProvider`
+  adapter, alongside the interface-only stub. No live Stripe account is
+  wired up (`stripe_api_key` is a dev-only placeholder); webhook-based charge
+  confirmation is not implemented.
+- **Plug & Charge**: validates real X.509 certificates (leaf signed by a
+  trusted CA, validity window, injectable OCSP revocation check) instead of
+  modeling the contract cert as a signed JWT.
+- **Mobile map**: renders on `flutter_map` over OpenStreetMap tiles (no API
+  key required) instead of a placeholder.
+- **Integration tests**: `tests/integration/test_redis_real.py` and
+  `test_nats_real.py` exercise the production Redis/NATS adapters against
+  real (non-Docker) servers. TimescaleDB has no non-Docker install path and
+  only runs for real in CI.
+
+Getting the full stack through a real CI run for the first time (this
+backlog was developed and reviewed in a sandbox where Docker/TimescaleDB
+network access is blocked) surfaced five migration bugs invisible to local
+testing against a bare Postgres instance — all fixed, see the Alembic
+migration history in `backend/alembic/versions/` for detail:
+
+1. `CREATE MATERIALIZED VIEW ... WITH (timescaledb.continuous)` can't
+   populate inside the transaction Alembic wraps every migration in.
+2. TimescaleDB refuses to create a continuous aggregate on a hypertable that
+   already has RLS enabled.
+3. TimescaleDB refuses to enable RLS on a hypertable that already has
+   compression turned on.
+4. RLS and compression can't coexist on the same hypertable under *any*
+   ordering — compression was dropped for `meter_value`/`status_log`
+   entirely; storage growth on those two tables is bounded by the existing
+   90-day retention policy instead.
+5. The `evagg_app`/`evagg_superadmin` DB roles were created `NOLOGIN`, but
+   they're the actual roles the app and the CI RLS-audit script connect as
+   — fixed to `LOGIN` with a password matching the dev-only connection
+   string defaults.
+
+See PR #1 and the commit history for the full narrative.

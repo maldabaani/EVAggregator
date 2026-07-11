@@ -1,0 +1,43 @@
+<div class="partner-list">
+  <header class="partner-list__header">
+    <h1>Roaming Partners</h1>
+  </header>
+
+  <ng-container *ngIf="partners$ | async as partners; else loading">
+    <div *ngIf="partners.length === 0; else table" class="partner-list__empty" data-testid="empty-state">
+      <p>No roaming partners connected yet.</p>
+      <a routerLink="/partners/new" class="button button--primary" data-testid="connect-partner-cta">
+        Connect a partner
+      </a>
+    </div>
+
+    <ng-template #table>
+      <table class="partner-list__table" data-testid="partner-table">
+        <thead>
+          <tr>
+            <th>Party ID</th>
+            <th>Country</th>
+            <th>Version</th>
+            <th>Status</th>
+            <th>Last handshake</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let partner of partners" [routerLink]="['/partners', partner.id]">
+            <td>{{ partner.party_id }}</td>
+            <td>{{ partner.country_code }}</td>
+            <td>{{ partner.negotiated_version || '—' }}</td>
+            <td>
+              <span class="status-badge" [class]="'status-badge--' + partner.status">{{ partner.status }}</span>
+            </td>
+            <td>{{ partner.last_handshake_at || 'Never' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </ng-template>
+  </ng-container>
+
+  <ng-template #loading>
+    <p data-testid="loading-state">Loading partners…</p>
+  </ng-template>
+</div>

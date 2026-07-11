@@ -18,15 +18,17 @@ This migration reads its table list from `evagg.scripts.audit_rls`, the same
 module used by the CI audit script, so there is exactly one source of truth
 for "which tables must have a tenant-isolation policy."
 
-Runs *before* the TimescaleDB migration (8679657fe757), not after: enabling
-RLS on `meter_value`/`status_log` while they're still plain tables avoids a
-real TimescaleDB restriction — it refuses to enable RLS on a hypertable that
-already has compression ("columnstore") turned on. Converting to a
-hypertable and enabling compression afterward is unaffected by RLS already
-being in place.
+Runs *between* the two TimescaleDB migrations (after 8679657fe757's
+hypertable + continuous aggregate setup, before
+timescale_compression_retention's compression/retention policies), not
+before or after both: TimescaleDB refuses to create a continuous aggregate
+on a hypertable that already has RLS enabled, so RLS can't come first — and
+separately refuses to enable RLS on a hypertable that already has
+compression ("columnstore") turned on, so RLS can't come after that either.
+This is the one slot that satisfies both real constraints.
 
 Revision ID: cb7ac4e49b9a
-Revises: b77170234860
+Revises: 8679657fe757
 Create Date: 2026-07-11 12:06:06.705857
 
 """
@@ -39,7 +41,7 @@ from evagg.scripts.audit_rls import SELF_TENANT_TABLES, tables_requiring_rls
 
 # revision identifiers, used by Alembic.
 revision: str = 'cb7ac4e49b9a'
-down_revision: Union[str, None] = 'b77170234860'
+down_revision: Union[str, None] = '8679657fe757'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

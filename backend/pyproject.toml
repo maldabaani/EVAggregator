@@ -13,7 +13,7 @@ dependencies = [
     "alembic>=1.13",
     "redis>=5.0",
     "nats-py>=2.7",
-    "pyjwt>=2.8",
+    "pyjwt[crypto]>=2.8",
     "python-multipart>=0.0.9",
     "websockets>=12.0",
 ]

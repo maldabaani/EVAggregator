@@ -52,8 +52,18 @@ def upgrade() -> None:
 
     # Continuous aggregate: hourly rollup of raw meter values, retained
     # indefinitely even after raw rows age out at 90 days.
-    bind.execute(
-        text(
+    #
+    # `CREATE MATERIALIZED VIEW ... WITH (timescaledb.continuous) AS ...`
+    # populates itself immediately (the implicit `WITH DATA`), which
+    # TimescaleDB refuses to do inside a transaction block — but Alembic
+    # wraps every migration in one transaction by default. This only
+    # surfaced once real TimescaleDB executed this migration for the first
+    # time (CI's docker-compose service); a bare Postgres install skips the
+    # whole migration via `requires_timescaledb` and never hits it.
+    # `autocommit_block()` steps outside that transaction just for this
+    # statement, then Alembic resumes a normal transaction afterward.
+    with op.get_context().autocommit_block():
+        op.execute(
             """
             CREATE MATERIALIZED VIEW meter_value_hourly
             WITH (timescaledb.continuous) AS
@@ -72,7 +82,6 @@ def upgrade() -> None:
             GROUP BY tenant_id, charger_id, transaction_id, measurand, unit, bucket
             """
         )
-    )
     bind.execute(
         text(
             "SELECT add_continuous_aggregate_policy('meter_value_hourly', "

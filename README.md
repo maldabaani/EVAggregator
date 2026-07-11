@@ -79,9 +79,10 @@ Since the backlog was finished, the following hardening passed a real CI run
 
 Getting the full stack through a real CI run for the first time (this
 backlog was developed and reviewed in a sandbox where Docker/TimescaleDB
-network access is blocked) surfaced five migration bugs invisible to local
-testing against a bare Postgres instance — all fixed, see the Alembic
-migration history in `backend/alembic/versions/` for detail:
+network access is blocked) surfaced seven bugs invisible to local testing —
+all fixed, and **CI is now fully green** (backend-ci, mobile-ci, portal-ci)
+on PR #1. See the Alembic migration history in `backend/alembic/versions/`
+and `backend/tests/integration/` for detail:
 
 1. `CREATE MATERIALIZED VIEW ... WITH (timescaledb.continuous)` can't
    populate inside the transaction Alembic wraps every migration in.
@@ -97,5 +98,29 @@ migration history in `backend/alembic/versions/` for detail:
    they're the actual roles the app and the CI RLS-audit script connect as
    — fixed to `LOGIN` with a password matching the dev-only connection
    string defaults.
+6. The new Redis/NATS integration tests imported `tests.integration.conftest`
+   as an absolute package path, which only resolves under `python -m pytest`
+   (cwd on `sys.path`) — CI's plain `pytest` invocation doesn't do that.
+   Switched to the relative-import convention `tests/unit` already used.
+7. An async integration test called Alembic's sync `command.upgrade`/
+   `downgrade` directly; those run migrations via their own internal
+   `asyncio.run(...)`, which fails from inside a test already running in
+   pytest-asyncio's event loop. Fixed with `asyncio.to_thread(...)`.
+
+## Known gaps (not yet addressed)
+
+- **PSP**: no real Stripe account behind `StripePaymentProvider`, and no
+  webhook handler for async charge confirmation.
+- **Plug & Charge OCSP**: still an injectable in-memory fake, no live OCSP
+  responder integration.
+- **No true end-to-end system test**: DB/RLS, Redis, and NATS adapters are
+  each verified against real services individually, but the app has never
+  been run live against all of them at once and driven over real HTTP.
+- **No observability, secrets manager, or deployment infra** (out of scope
+  for this phase).
+- **Portal (Angular)**: Task 4.4's "B2B corporate cost allocation dashboard"
+  only got a backend service (`CostReportService`) — no Angular dashboard UI
+  was ever built to display it, unlike Task 1.3 (partners) and Task 3.1
+  (tariffs), which both have `portal/src/app/features/` components.
 
 See PR #1 and the commit history for the full narrative.

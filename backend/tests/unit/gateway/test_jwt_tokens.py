@@ -26,7 +26,14 @@ def test_expired_token_is_rejected():
 
 def test_tampered_signature_is_rejected():
     token = create_access_token(subject="driver-1", tenant_id=uuid.uuid4())
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    header, payload, signature = token.split(".")
+    # Flip a character well before the end of the signature: the last base64url
+    # character of a 32-byte HMAC digest only carries 4 significant bits (the
+    # other 2 are padding that decoders ignore), so tampering with it can
+    # coincidentally leave the decoded signature bytes unchanged and make the
+    # test flaky. An earlier character always changes a full 6-bit group.
+    tampered_signature = ("A" if signature[0] != "A" else "B") + signature[1:]
+    tampered = f"{header}.{payload}.{tampered_signature}"
 
     with pytest.raises(TokenError):
         decode_access_token(tampered)

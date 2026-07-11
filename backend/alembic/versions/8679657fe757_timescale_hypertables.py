@@ -15,8 +15,15 @@ compression per Task 6.2:
   volume data from Task 2.2's load test" — revisit once production write
   volume is known.
 
+Runs *after* the RLS migration (cb7ac4e49b9a), not before: TimescaleDB
+refuses `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` once a hypertable has
+compression ("columnstore") enabled. RLS has to be enabled on `meter_value`/
+`status_log` while they're still plain tables; converting to hypertables and
+turning on compression afterward doesn't disturb the RLS policy already in
+place.
+
 Revision ID: 8679657fe757
-Revises: b77170234860
+Revises: cb7ac4e49b9a
 Create Date: 2026-07-11 12:06:06.247342
 
 """
@@ -27,7 +34,7 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = '8679657fe757'
-down_revision: Union[str, None] = 'b77170234860'
+down_revision: Union[str, None] = 'cb7ac4e49b9a'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

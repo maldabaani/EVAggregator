@@ -34,9 +34,27 @@ pytest tests/integration            # requires the docker-compose services above
 uvicorn evagg.main:app --reload
 ```
 
+## Portal quickstart
+
+```bash
+cd portal
+npm install
+npm test    # Karma + Jasmine; needs CHROME_BIN set if no system Chrome (see portal/README.md)
+npm start
+```
+
+## Mobile quickstart
+
+```bash
+cd mobile
+flutter pub get
+flutter test
+flutter run
+```
+
 ## Status
 
-Foundation (Epic 6 relational schema + TimescaleDB hypertables, Epic 4's
-multi-tenancy RLS framework) is in place. See the task tracker / commit history
-for progress across the remaining epics (OCPI, OCPP gateway, billing, fleet,
-driver app).
+Epics 1-4 and 6 complete (OCPI roaming, OCPP gateway, tariff/billing engine,
+fleet management, DB/infra + multi-tenancy). Epic 5 (Flutter driver app) is
+in progress — live map discovery (Task 5.1) is done. See the task tracker /
+commit history for detail on each task.

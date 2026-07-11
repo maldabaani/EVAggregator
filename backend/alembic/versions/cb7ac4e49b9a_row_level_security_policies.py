@@ -27,6 +27,16 @@ compression coexist on the same hypertable at all, which is why compression
 was dropped for `meter_value`/`status_log` rather than reordered around;
 see that migration's docstring.)
 
+`evagg_app`/`evagg_superadmin` are created with `LOGIN` and a password
+matching `Settings.database_url`/`superadmin_database_url`'s dev-only
+defaults (`evagg_app`/`evagg_superadmin` — resolved via secrets manager at
+real deploy time, same as every other credential in this codebase) — they
+are the roles the app's connection pool and CI's RLS audit script actually
+connect as, not pure permission groups, so `NOLOGIN` (the original design)
+made them impossible to ever connect as at all. This was never caught
+before CI ran the full migration chain + audit script against a real
+Postgres for the first time.
+
 Revision ID: cb7ac4e49b9a
 Revises: 8679657fe757
 Create Date: 2026-07-11 12:06:06.705857
@@ -57,10 +67,10 @@ def upgrade() -> None:
             DO $$
             BEGIN
                 IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'evagg_app') THEN
-                    CREATE ROLE evagg_app NOLOGIN;
+                    CREATE ROLE evagg_app LOGIN PASSWORD 'evagg_app';
                 END IF;
                 IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'evagg_superadmin') THEN
-                    CREATE ROLE evagg_superadmin NOLOGIN BYPASSRLS;
+                    CREATE ROLE evagg_superadmin LOGIN PASSWORD 'evagg_superadmin' BYPASSRLS;
                 END IF;
             END
             $$;

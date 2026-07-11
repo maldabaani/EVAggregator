@@ -12,4 +12,9 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/partners/partner-detail/partner-detail.component').then((m) => m.PartnerDetailComponent),
   },
+  {
+    path: 'tariffs/new',
+    loadComponent: () =>
+      import('./features/tariffs/tariff-builder/tariff-builder.component').then((m) => m.TariffBuilderComponent),
+  },
 ];

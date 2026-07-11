@@ -25,6 +25,8 @@ class MembershipStore(Protocol):
 
     async def list_for_team(self, team_id: uuid.UUID) -> list[DriverTeamMembership]: ...
 
+    async def list_team_ids_for_driver(self, driver_id: uuid.UUID) -> set[uuid.UUID]: ...
+
 
 class InMemoryMembershipStore:
     def __init__(self) -> None:
@@ -37,3 +39,6 @@ class InMemoryMembershipStore:
 
     async def list_for_team(self, team_id: uuid.UUID) -> list[DriverTeamMembership]:
         return [m for m in self._memberships if m.team_id == team_id]
+
+    async def list_team_ids_for_driver(self, driver_id: uuid.UUID) -> set[uuid.UUID]:
+        return {m.team_id for m in self._memberships if m.driver_id == driver_id}

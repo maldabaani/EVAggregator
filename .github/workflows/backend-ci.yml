@@ -1,0 +1,61 @@
+name: backend-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+  pull_request:
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: pytest tests/unit --cov=src/evagg --cov-report=term-missing --cov-fail-under=80
+
+  integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: evagg
+          POSTGRES_PASSWORD: evagg
+          POSTGRES_DB: evagg
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U evagg -d evagg"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+      # NOTE: GitHub Actions' `services:` block can't override the container
+      # command, so this plain image runs without JetStream (`-js`) enabled.
+      # Fine for the current DB/RLS integration tests; Epic 2's NATS-backed
+      # tests will need a custom-built service image or a docker-run step.
+      nats:
+        image: nats:2.10-alpine
+        ports: ["4222:4222"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: alembic upgrade head
+      - run: python -m evagg.scripts.audit_rls
+      - run: pytest tests/integration

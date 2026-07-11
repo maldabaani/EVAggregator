@@ -16,7 +16,7 @@ import pytest
 
 from evagg.core.config import settings
 from evagg.ocpp_gateway.event_bus import STREAM_NAME, NatsEventBus, event_subject
-from tests.integration.conftest import requires_nats
+from conftest import requires_nats
 
 
 @requires_nats

@@ -30,7 +30,7 @@ from alembic import command
 from alembic.config import Config
 
 from evagg.core.config import settings
-from tests.integration.conftest import requires_timescaledb
+from conftest import requires_timescaledb
 
 ALEMBIC_INI = "alembic.ini"
 

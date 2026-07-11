@@ -21,7 +21,7 @@ import redis.asyncio as redis_asyncio
 from evagg.carbon.cache import RedisCarbonCache
 from evagg.core.config import settings
 from evagg.gateway.rate_limit import RedisRateLimiter
-from tests.integration.conftest import requires_redis
+from conftest import requires_redis
 
 
 @pytest.fixture

@@ -217,5 +217,97 @@ async def test_stop_transaction_flushes_trailing_meter_values():
     assert sink.batches == []  # buffered, below threshold
 
     await handlers.handle_stop_transaction(start_response.transaction_id, meter_stop=500, stop_timestamp=ts)
-
     assert len(sink.batches) == 1  # flushed on session close, not left stranded
+
+
+@pytest.mark.asyncio
+async def test_data_transfer_always_accepted_and_published():
+    handlers, *_, events = _build_handlers()
+    response = await handlers.handle_data_transfer(CHARGER_ID, TENANT_ID, "com.acme", "Ping", "hello")
+
+    assert response == {"status": "Accepted"}
+    assert events.ocpp_events == [(TENANT_ID, CHARGER_ID, "data_transfer", {
+        "vendor_id": "com.acme", "message_id": "Ping", "data": "hello",
+    })]
+
+
+@pytest.mark.asyncio
+async def test_firmware_status_notification_publishes_event_without_a_store():
+    handlers, *_, events = _build_handlers()
+    await handlers.handle_firmware_status_notification(CHARGER_ID, TENANT_ID, "Installing")
+
+    assert events.ocpp_events == [(TENANT_ID, CHARGER_ID, "firmware_status", {"status": "Installing"})]
+
+
+@pytest.mark.asyncio
+async def test_firmware_status_notification_updates_the_latest_pending_update():
+    from evagg.ocpp_gateway.commands import InMemoryFirmwareUpdateStore
+
+    firmware_store = InMemoryFirmwareUpdateStore()
+    await firmware_store.start_update(CHARGER_ID, TENANT_ID, "2.1.0")
+
+    charger_registry = InMemoryChargerRegistry()
+    connector_store = InMemoryConnectorStore()
+    authorizer = Authorizer(InMemoryLocalIdTagStore(), InMemoryRoamingTokenChecker())
+    transactions = InMemoryTransactionRepository()
+    buffer = MeterValueBuffer(InMemoryMeterValueSink(), clock=lambda: 0.0)
+    events = InMemoryEventPublisher()
+    handlers = OcppMessageHandlers(
+        charger_registry, connector_store, authorizer, transactions, buffer, events,
+        firmware_update_store=firmware_store,
+    )
+
+    await handlers.handle_firmware_status_notification(CHARGER_ID, TENANT_ID, "Installed")
+
+    record = await firmware_store.get(CHARGER_ID, "2.1.0")
+    assert record.status == "Installed"
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_status_notification_publishes_event():
+    handlers, *_, events = _build_handlers()
+    await handlers.handle_diagnostics_status_notification(CHARGER_ID, TENANT_ID, "Uploaded")
+
+    assert events.ocpp_events == [(TENANT_ID, CHARGER_ID, "diagnostics_status", {"status": "Uploaded"})]
+
+
+@pytest.mark.asyncio
+async def test_security_event_notification_publishes_event():
+    handlers, *_, events = _build_handlers()
+    await handlers.handle_security_event_notification(CHARGER_ID, TENANT_ID, "FirmwareUpdated", "2026-01-01T00:00:00Z", "boot ok")
+
+    assert events.ocpp_events == [(
+        TENANT_ID, CHARGER_ID, "security_event",
+        {"type": "FirmwareUpdated", "timestamp": "2026-01-01T00:00:00Z", "tech_info": "boot ok"},
+    )]
+
+
+@pytest.mark.asyncio
+async def test_log_status_notification_publishes_event():
+    handlers, *_, events = _build_handlers()
+    await handlers.handle_log_status_notification(CHARGER_ID, TENANT_ID, "Uploaded", 7)
+
+    assert events.ocpp_events == [(TENANT_ID, CHARGER_ID, "log_status", {"status": "Uploaded", "request_id": 7})]
+
+
+@pytest.mark.asyncio
+async def test_handle_frame_dispatches_the_five_new_actions():
+    handlers, *_, events = _build_handlers()
+
+    assert await handlers.handle_frame(CHARGER_ID, TENANT_ID, "DataTransfer", {"vendor_id": "com.acme"}) == {
+        "status": "Accepted"
+    }
+    assert await handlers.handle_frame(CHARGER_ID, TENANT_ID, "FirmwareStatusNotification", {"status": "Idle"}) == {}
+    assert await handlers.handle_frame(CHARGER_ID, TENANT_ID, "DiagnosticsStatusNotification", {"status": "Idle"}) == {}
+    assert await handlers.handle_frame(
+        CHARGER_ID, TENANT_ID, "SecurityEventNotification", {"type": "InvalidId", "timestamp": "2026-01-01T00:00:00Z"}
+    ) == {}
+    assert await handlers.handle_frame(CHARGER_ID, TENANT_ID, "LogStatusNotification", {"status": "Idle"}) == {}
+    assert len(events.ocpp_events) == 5
+
+
+@pytest.mark.asyncio
+async def test_handle_frame_still_rejects_unsupported_actions():
+    handlers, *_ = _build_handlers()
+    with pytest.raises(ValueError, match="unsupported OCPP action"):
+        await handlers.handle_frame(CHARGER_ID, TENANT_ID, "SomeFutureAction", {})

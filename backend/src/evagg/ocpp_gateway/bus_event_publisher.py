@@ -32,3 +32,11 @@ class BusEventPublisher:
             event_subject(tenant_id, charger_id, "stop_transaction"),
             {"charger_id": charger_id, "transaction_id": str(transaction_id)},
         )
+
+    async def publish_ocpp_event(
+        self, tenant_id: uuid.UUID, charger_id: str, event_type: str, payload: dict
+    ) -> None:
+        await self._bus.publish(
+            event_subject(tenant_id, charger_id, event_type),
+            {"charger_id": charger_id, **payload},
+        )

@@ -39,7 +39,8 @@ OCPP event bus all use their real backing service here regardless of
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import redis.asyncio as redis_asyncio
 
@@ -70,6 +71,13 @@ from evagg.ocpi.partner_admin import InMemoryReconciliationResultStore
 from evagg.ocpi.partner_store import InMemoryPartnerRegistry
 from evagg.ocpi.session_sync import HttpSessionPushClient, InMemorySessionPushClient, SessionPushClient
 from evagg.ocpp_gateway.authorize import AuthStatus, Authorizer, InMemoryLocalIdTagStore, InMemoryRoamingTokenChecker
+from evagg.ocpp_gateway.commands import (
+    CommandLogStore,
+    FirmwareUpdateStore,
+    InMemoryCommandLogStore,
+    InMemoryFirmwareUpdateStore,
+    RemoteCommandService,
+)
 from evagg.ocpp_gateway.connection_manager import ConnectionManager
 from evagg.ocpp_gateway.connectors import ConnectorStore, InMemoryConnectorStore
 from evagg.ocpp_gateway.credentials import CredentialVerifier, InMemoryCredentialVerifier
@@ -77,9 +85,11 @@ from evagg.ocpp_gateway.event_bus import NatsEventBus
 from evagg.ocpp_gateway.bus_event_publisher import BusEventPublisher
 from evagg.ocpp_gateway.message_handlers import OcppMessageHandlers
 from evagg.ocpp_gateway.meter_values import InMemoryMeterValueSink, MeterValueBuffer, MeterValueSink
+from evagg.ocpp_gateway.nats_command_transport import NatsCommandTransport, serve_commands
 from evagg.ocpp_gateway.presence import PresenceRegistry, RedisPresenceRegistry
 from evagg.ocpp_gateway.registration import ChargerRegistry, InMemoryChargerRegistry
 from evagg.ocpp_gateway.transactions import InMemoryTransactionRepository, TransactionRepository
+from evagg.ocpp_gateway.ws_app import LiveConnectionRegistry
 from evagg.persistence.supabase_billing import SupabaseTariffStore, SupabaseWalletLedgerStore
 from evagg.persistence.supabase_client import SupabaseRestClient
 from evagg.persistence.supabase_ocpp import (
@@ -155,8 +165,19 @@ class Services:
     connection_manager: ConnectionManager
     message_handlers: OcppMessageHandlers
     credential_verifier: CredentialVerifier
+    live_connections: LiveConnectionRegistry
+    firmware_update_store: FirmwareUpdateStore
+    node_id: str
+    command_log_store: CommandLogStore
+    command_transport: NatsCommandTransport
+    remote_command_service: RemoteCommandService
 
     redis_client: redis_asyncio.Redis
+    # Set by `startup_services` once `serve_commands` has subscribed — this
+    # node can't receive outbound commands until then. `Any` because it's
+    # the raw `nats.aio.client.Client` connection, imported lazily inside
+    # `nats_command_transport` to keep that import optional everywhere else.
+    _command_listener_nc: Any = field(default=None, repr=False)
 
 
 def _build_payment_provider() -> PaymentProvider:
@@ -288,6 +309,17 @@ def build_services() -> Services:
         local_id_tag_store.set_status("TAG-123", AuthStatus.ACCEPTED)
     authorizer = Authorizer(local_id_tag_store, InMemoryRoamingTokenChecker())
     event_publisher = BusEventPublisher(event_bus)
+    node_id = f"ocpp-gw-{uuid.uuid4().hex[:8]}"
+    live_connections = LiveConnectionRegistry()
+    firmware_update_store: FirmwareUpdateStore = InMemoryFirmwareUpdateStore()
+    command_log_store: CommandLogStore = InMemoryCommandLogStore()
+    command_transport = NatsCommandTransport(settings.nats_url)
+    remote_command_service = RemoteCommandService(
+        presence=presence_registry,
+        command_log=command_log_store,
+        transport=command_transport,
+        firmware_store=firmware_update_store,
+    )
 
     connection_manager = ConnectionManager(
         presence=presence_registry,
@@ -295,7 +327,7 @@ def build_services() -> Services:
         transactions=transaction_repository,
         charger_registry=charger_registry,
         events=event_publisher,
-        node_id=f"ocpp-gw-{uuid.uuid4().hex[:8]}",
+        node_id=node_id,
         default_heartbeat_interval_seconds=settings.heartbeat_default_interval_seconds,
     )
     message_handlers = OcppMessageHandlers(
@@ -305,6 +337,7 @@ def build_services() -> Services:
         transaction_repository=transaction_repository,
         meter_value_buffer=meter_value_buffer,
         events=event_publisher,
+        firmware_update_store=firmware_update_store,
     )
 
     return Services(
@@ -326,16 +359,33 @@ def build_services() -> Services:
         connection_manager=connection_manager,
         message_handlers=message_handlers,
         credential_verifier=credential_verifier,
+        live_connections=live_connections,
+        firmware_update_store=firmware_update_store,
+        node_id=node_id,
+        command_log_store=command_log_store,
+        command_transport=command_transport,
+        remote_command_service=remote_command_service,
         redis_client=redis_client,
     )
 
 
 async def startup_services(services: Services) -> None:
     """`NatsEventBus.connect()` provisions the JetStream stream and must run
-    before the first publish — call from each app's FastAPI lifespan."""
+    before the first publish — call from each app's FastAPI lifespan.
+    `command_transport.connect()` and `serve_commands()` bring up the two
+    halves of the outbound-command channel: this process can now issue
+    commands (`RemoteCommandService.send_command`), and this node's live
+    WebSocket connections can now receive them, addressed via `node_id`."""
     await services.event_bus.connect()
+    await services.command_transport.connect()
+    services._command_listener_nc = await serve_commands(
+        settings.nats_url, services.node_id, services.live_connections
+    )
 
 
 async def shutdown_services(services: Services) -> None:
     await services.event_bus.close()
+    await services.command_transport.close()
+    if services._command_listener_nc is not None:
+        await services._command_listener_nc.close()
     await services.redis_client.aclose()

@@ -12,12 +12,17 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
+from typing import TYPE_CHECKING
+
 from evagg.ocpp_gateway.authorize import AuthStatus, Authorizer
 from evagg.ocpp_gateway.connectors import ConnectorStore
 from evagg.ocpp_gateway.events import EventPublisher
 from evagg.ocpp_gateway.meter_values import MeterReading, MeterValueBuffer
 from evagg.ocpp_gateway.registration import ChargerRegistry
 from evagg.ocpp_gateway.transactions import ActiveTransaction, StopResult, TransactionRepository
+
+if TYPE_CHECKING:
+    from evagg.ocpp_gateway.commands import FirmwareUpdateStore
 
 _BOOT_STATUS_MAP = {"pending": "Pending", "accepted": "Accepted", "rejected": "Rejected"}
 
@@ -49,6 +54,7 @@ class OcppMessageHandlers:
         meter_value_buffer: MeterValueBuffer,
         events: EventPublisher,
         default_heartbeat_interval_seconds: int = 300,
+        firmware_update_store: "FirmwareUpdateStore | None" = None,
     ) -> None:
         self._charger_registry = charger_registry
         self._connector_store = connector_store
@@ -57,6 +63,10 @@ class OcppMessageHandlers:
         self._meter_values = meter_value_buffer
         self._events = events
         self._default_heartbeat_interval_seconds = default_heartbeat_interval_seconds
+        # Optional: FirmwareStatusNotification still publishes an OCPP event
+        # without it, it just can't also update Task 2.3's FirmwareUpdateStore
+        # (kept optional so Task 2.2's tests don't need Task 2.3's module).
+        self._firmware_update_store = firmware_update_store
 
     async def handle_boot_notification(
         self,
@@ -138,6 +148,45 @@ class OcppMessageHandlers:
                 )
             )
 
+    async def handle_data_transfer(
+        self, charger_id: str, tenant_id: uuid.UUID, vendor_id: str, message_id: str | None, data: str | None
+    ) -> dict:
+        """No vendor-specific extension is implemented (none is needed yet)
+        — this is the generic pass-through/extension point the spec
+        requires every CSMS to at least acknowledge, not a specific vendor
+        integration. Always Accepted; publishes the raw payload so a real
+        vendor handler can be added later without changing this shape."""
+        await self._events.publish_ocpp_event(
+            tenant_id, charger_id, "data_transfer", {"vendor_id": vendor_id, "message_id": message_id, "data": data}
+        )
+        return {"status": "Accepted"}
+
+    async def handle_firmware_status_notification(self, charger_id: str, tenant_id: uuid.UUID, status: str) -> None:
+        await self._events.publish_ocpp_event(tenant_id, charger_id, "firmware_status", {"status": status})
+        if self._firmware_update_store is not None:
+            record = await self._firmware_update_store.get_latest_for_charger(charger_id)
+            if record is not None:
+                await self._firmware_update_store.update_status(charger_id, record.version, status)
+
+    async def handle_diagnostics_status_notification(
+        self, charger_id: str, tenant_id: uuid.UUID, status: str
+    ) -> None:
+        await self._events.publish_ocpp_event(tenant_id, charger_id, "diagnostics_status", {"status": status})
+
+    async def handle_security_event_notification(
+        self, charger_id: str, tenant_id: uuid.UUID, event_type: str, timestamp: str, tech_info: str | None
+    ) -> None:
+        await self._events.publish_ocpp_event(
+            tenant_id, charger_id, "security_event", {"type": event_type, "timestamp": timestamp, "tech_info": tech_info}
+        )
+
+    async def handle_log_status_notification(
+        self, charger_id: str, tenant_id: uuid.UUID, status: str, request_id: int | None
+    ) -> None:
+        await self._events.publish_ocpp_event(
+            tenant_id, charger_id, "log_status", {"status": status, "request_id": request_id}
+        )
+
     async def handle_frame(self, charger_id: str, tenant_id: uuid.UUID, action: str, payload: dict) -> dict:
         if action == "BootNotification":
             response = await self.handle_boot_notification(
@@ -183,6 +232,29 @@ class OcppMessageHandlers:
                 payload["ts"],
                 payload["readings"],
             )
+            return {}
+
+        if action == "DataTransfer":
+            return await self.handle_data_transfer(
+                charger_id, tenant_id, payload["vendor_id"], payload.get("message_id"), payload.get("data")
+            )
+
+        if action == "FirmwareStatusNotification":
+            await self.handle_firmware_status_notification(charger_id, tenant_id, payload["status"])
+            return {}
+
+        if action == "DiagnosticsStatusNotification":
+            await self.handle_diagnostics_status_notification(charger_id, tenant_id, payload["status"])
+            return {}
+
+        if action == "SecurityEventNotification":
+            await self.handle_security_event_notification(
+                charger_id, tenant_id, payload["type"], payload["timestamp"], payload.get("tech_info")
+            )
+            return {}
+
+        if action == "LogStatusNotification":
+            await self.handle_log_status_notification(charger_id, tenant_id, payload["status"], payload.get("request_id"))
             return {}
 
         raise ValueError(f"unsupported OCPP action: {action}")

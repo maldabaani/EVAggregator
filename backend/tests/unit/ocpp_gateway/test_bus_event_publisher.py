@@ -40,3 +40,14 @@ async def test_publish_stop_transaction_uses_correct_subject_hierarchy():
 
     assert bus.published[0].subject == f"ocpp.{TENANT_ID}.CP-1.stop_transaction"
     assert bus.published[0].payload["transaction_id"] == str(transaction_id)
+
+
+@pytest.mark.asyncio
+async def test_publish_ocpp_event_uses_the_event_type_as_the_subject_suffix():
+    bus = InMemoryEventBus()
+    publisher = BusEventPublisher(bus)
+
+    await publisher.publish_ocpp_event(TENANT_ID, "CP-1", "security_event", {"type": "InvalidId"})
+
+    assert bus.published[0].subject == f"ocpp.{TENANT_ID}.CP-1.security_event"
+    assert bus.published[0].payload == {"charger_id": "CP-1", "type": "InvalidId"}

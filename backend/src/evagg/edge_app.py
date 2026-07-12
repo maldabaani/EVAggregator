@@ -50,6 +50,8 @@ async def _reconciliation_store():
 
 app.include_router(build_ocpi_router(_partner_registry, _location_repository))
 app.include_router(build_admin_router(_partner_registry, _reconciliation_store))
-app.include_router(build_ocpp_ws_router(services.connection_manager, services.message_handlers))
+app.include_router(
+    build_ocpp_ws_router(services.connection_manager, services.message_handlers, services.live_connections)
+)
 
 instrument_app(app, services.redis_client)

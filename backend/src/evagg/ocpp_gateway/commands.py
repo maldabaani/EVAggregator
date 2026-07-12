@@ -175,14 +175,24 @@ class FirmwareUpdateStore(Protocol):
 
     async def get(self, charger_id: str, version: str) -> FirmwareUpdateRecord | None: ...
 
+    async def get_latest_for_charger(self, charger_id: str) -> FirmwareUpdateRecord | None:
+        """OCPP 1.6's `FirmwareStatusNotification.req` carries only `{status}`
+        — no version — so the inbound handler (`OcppMessageHandlers.
+        handle_firmware_status_notification`) has to resolve "which update is
+        this charger reporting on" from whichever one we most recently told
+        it to install, not from the message itself."""
+        ...
+
 
 class InMemoryFirmwareUpdateStore:
     def __init__(self) -> None:
         self._records: dict[tuple[str, str], FirmwareUpdateRecord] = {}
+        self._latest_version_by_charger: dict[str, str] = {}
 
     async def start_update(self, charger_id: str, tenant_id: uuid.UUID, version: str) -> FirmwareUpdateRecord:
         record = FirmwareUpdateRecord(charger_id=charger_id, tenant_id=tenant_id, version=version, status="pending")
         self._records[(charger_id, version)] = record
+        self._latest_version_by_charger[charger_id] = version
         return record
 
     async def update_status(self, charger_id: str, version: str, status: str) -> FirmwareUpdateRecord:
@@ -194,6 +204,10 @@ class InMemoryFirmwareUpdateStore:
 
     async def get(self, charger_id: str, version: str) -> FirmwareUpdateRecord | None:
         return self._records.get((charger_id, version))
+
+    async def get_latest_for_charger(self, charger_id: str) -> FirmwareUpdateRecord | None:
+        version = self._latest_version_by_charger.get(charger_id)
+        return self._records.get((charger_id, version)) if version else None
 
 
 # --- The service ---------------------------------------------------------

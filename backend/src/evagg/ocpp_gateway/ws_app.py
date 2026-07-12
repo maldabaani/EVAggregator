@@ -8,6 +8,15 @@ module does is thin plumbing over already-tested logic
 OCPP-J spec), convert JSON-safe values (ISO timestamps, list-of-list meter
 readings) into what the handlers expect, and dispatch.
 
+`LiveConnectionRegistry` is what makes outbound commands (RemoteStart,
+Reset, ...) possible at all: it's the per-process map of `charger_id -> the
+actual open WebSocket`, so something that receives a command request (over
+NATS — see `evagg.ocpp_gateway.nats_command_transport`) on *this* node can
+find the live socket and push a server-initiated Call down it, then match
+the charger's CallResult/CallError back to that specific pending request —
+a plain request/reply pattern, keyed by the Call's own `uniqueId`, layered
+on top of one shared WebSocket receive loop per connection.
+
 Simplifications versus a real charge point integration (documented, not
 hidden): `tenant_id` and the per-charger `credential` are read from query
 parameters rather than HTTP Basic Auth in the WS upgrade request, since
@@ -18,6 +27,7 @@ production transport would need to parse from the handshake headers.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime
 
@@ -29,6 +39,72 @@ from evagg.ocpp_gateway.message_handlers import OcppMessageHandlers
 CALL = 2
 CALL_RESULT = 3
 CALL_ERROR = 4
+
+
+class RemoteCallTimeout(Exception):
+    pass
+
+
+class RemoteCallRejected(Exception):
+    def __init__(self, error_code: str, description: str) -> None:
+        super().__init__(f"{error_code}: {description}")
+        self.error_code = error_code
+        self.description = description
+
+
+class LiveConnection:
+    """One open WebSocket, plus whichever server-initiated Calls are
+    currently awaiting a CallResult/CallError from this specific charger."""
+
+    def __init__(self, websocket: WebSocket) -> None:
+        self._websocket = websocket
+        self._pending: dict[str, asyncio.Future] = {}
+
+    async def send_call(self, action: str, payload: dict, timeout_seconds: float) -> dict:
+        unique_id = str(uuid.uuid4())
+        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._pending[unique_id] = future
+        try:
+            await self._websocket.send_json([CALL, unique_id, action, payload])
+            return await asyncio.wait_for(future, timeout=timeout_seconds)
+        except asyncio.TimeoutError as exc:
+            raise RemoteCallTimeout(f"{action} timed out waiting for the charge point") from exc
+        finally:
+            self._pending.pop(unique_id, None)
+
+    def resolve(self, unique_id: str, result: dict) -> bool:
+        future = self._pending.get(unique_id)
+        if future is None or future.done():
+            return False
+        future.set_result(result)
+        return True
+
+    def reject(self, unique_id: str, error_code: str, description: str) -> bool:
+        future = self._pending.get(unique_id)
+        if future is None or future.done():
+            return False
+        future.set_exception(RemoteCallRejected(error_code, description))
+        return True
+
+
+class LiveConnectionRegistry:
+    """Per-process only, deliberately — a charger is connected to exactly
+    one gateway node's WebSocket at a time, never shared across processes.
+    Cross-node addressing (which node is *this* charger even connected to)
+    is the presence registry's job (Task 2.1), not this registry's."""
+
+    def __init__(self) -> None:
+        self._connections: dict[str, LiveConnection] = {}
+
+    def register(self, charger_id: str, connection: LiveConnection) -> None:
+        self._connections[charger_id] = connection
+
+    def unregister(self, charger_id: str, connection: LiveConnection) -> None:
+        if self._connections.get(charger_id) is connection:
+            del self._connections[charger_id]
+
+    def get(self, charger_id: str) -> LiveConnection | None:
+        return self._connections.get(charger_id)
 
 
 def _prepare_payload(action: str, payload: dict) -> dict:
@@ -48,8 +124,13 @@ def _prepare_payload(action: str, payload: dict) -> dict:
     return prepared
 
 
-def build_ocpp_ws_router(connection_manager: ConnectionManager, message_handlers: OcppMessageHandlers) -> APIRouter:
+def build_ocpp_ws_router(
+    connection_manager: ConnectionManager,
+    message_handlers: OcppMessageHandlers,
+    live_connections: LiveConnectionRegistry | None = None,
+) -> APIRouter:
     router = APIRouter()
+    live_connections = live_connections if live_connections is not None else LiveConnectionRegistry()
 
     @router.websocket("/ocpp/{charger_id}")
     async def ocpp_endpoint(websocket: WebSocket, charger_id: str) -> None:
@@ -75,11 +156,33 @@ def build_ocpp_ws_router(connection_manager: ConnectionManager, message_handlers
             return
 
         await websocket.accept(subprotocol=subprotocol)
+        connection = LiveConnection(websocket)
+        live_connections.register(charger_id, connection)
 
         try:
             while True:
                 frame = await websocket.receive_json()
-                if not isinstance(frame, list) or len(frame) < 3 or frame[0] != CALL:
+                if not isinstance(frame, list) or len(frame) < 2:
+                    await websocket.send_json([CALL_ERROR, "unknown", "ProtocolError", "malformed OCPP-J frame", {}])
+                    continue
+
+                frame_type = frame[0]
+
+                if frame_type == CALL_RESULT:
+                    # A reply to a Call *we* sent (an outbound command) —
+                    # route it to that pending request, not through the
+                    # inbound-action dispatch below.
+                    connection.resolve(frame[1], frame[2] if len(frame) > 2 else {})
+                    continue
+
+                if frame_type == CALL_ERROR:
+                    connection.reject(
+                        frame[1], frame[2] if len(frame) > 2 else "GenericError",
+                        frame[3] if len(frame) > 3 else "",
+                    )
+                    continue
+
+                if frame_type != CALL or len(frame) < 3:
                     await websocket.send_json([CALL_ERROR, "unknown", "ProtocolError", "expected an OCPP Call frame", {}])
                     continue
 
@@ -106,6 +209,7 @@ def build_ocpp_ws_router(connection_manager: ConnectionManager, message_handlers
         except WebSocketDisconnect:
             pass
         finally:
+            live_connections.unregister(charger_id, connection)
             await connection_manager.handle_disconnect(charger_id)
 
     return router

@@ -19,6 +19,7 @@ from evagg.ocpi.errors import OcpiErrorCode, map_exception_to_ocpi_error
 from evagg.ocpi.locations import InMemoryLocationRepository
 from evagg.ocpi.partner_store import InMemoryPartnerRegistry, Partner
 from evagg.ocpi.charging_profiles import ChargingProfileService, InMemoryActiveChargingProfileStore, InMemorySessionChargerMap
+from evagg.ocpi.commands import OcpiCommandService
 from evagg.ocpi.router import build_ocpi_router, register_ocpi_exception_handlers
 from evagg.ocpi.tariff_bridge import OcpiTariffCatalog
 from evagg.ocpi.v221.adapters import location_to_v221
@@ -52,6 +53,22 @@ def _build_charging_profile_service() -> ChargingProfileService:
     )
 
 
+def _build_ocpi_command_service() -> OcpiCommandService:
+    from evagg.ocpp_gateway.commands import (
+        FakeCommandTransport,
+        InMemoryCommandLogStore,
+        InMemoryFirmwareUpdateStore,
+        RemoteCommandService,
+    )
+    from evagg.ocpp_gateway.presence import InMemoryPresenceRegistry
+    from evagg.ocpp_gateway.transactions import InMemoryTransactionRepository
+
+    command_service = RemoteCommandService(
+        InMemoryPresenceRegistry(), InMemoryCommandLogStore(), FakeCommandTransport(), InMemoryFirmwareUpdateStore()
+    )
+    return OcpiCommandService(InMemorySessionChargerMap(), InMemoryTransactionRepository(), command_service)
+
+
 def _sample_location() -> OCPILocation:
     return OCPILocation(
         id="LOC-1",
@@ -68,7 +85,9 @@ def _sample_location() -> OCPILocation:
     )
 
 
-def _build_app(partner_registry, location_repo, tariff_catalog=None, charging_profile_service=None) -> FastAPI:
+def _build_app(
+    partner_registry, location_repo, tariff_catalog=None, charging_profile_service=None, ocpi_command_service=None
+) -> FastAPI:
     app = FastAPI()
     register_ocpi_exception_handlers(app)
 
@@ -84,8 +103,14 @@ def _build_app(partner_registry, location_repo, tariff_catalog=None, charging_pr
     async def get_charging_profile_service():
         return charging_profile_service or _build_charging_profile_service()
 
+    async def get_ocpi_command_service():
+        return ocpi_command_service or _build_ocpi_command_service()
+
     app.include_router(
-        build_ocpi_router(get_partner_registry, get_location_repo, get_tariff_catalog, get_charging_profile_service)
+        build_ocpi_router(
+            get_partner_registry, get_location_repo, get_tariff_catalog, get_charging_profile_service,
+            get_ocpi_command_service,
+        )
     )
     return app
 
@@ -374,3 +399,112 @@ def test_get_charging_profile_v230_for_unknown_session():
 
     assert response.status_code == 200
     assert response.json() == {"result": "UNKNOWN_SESSION", "profile": None}
+
+
+# --- Commands module (2.2.1+ only) ------------------------------------------
+
+
+def _build_ocpi_command_app_pieces():
+    from evagg.ocpp_gateway.commands import (
+        CommandOutcome, CommandStatus, FakeCommandTransport, InMemoryCommandLogStore,
+        InMemoryFirmwareUpdateStore, RemoteCommandService,
+    )
+    from evagg.ocpp_gateway.presence import InMemoryPresenceRegistry
+    from evagg.ocpp_gateway.transactions import InMemoryTransactionRepository
+
+    presence = InMemoryPresenceRegistry()
+    transport = FakeCommandTransport()
+    transport.set_outcome("CP-1", CommandOutcome(CommandStatus.ACCEPTED, {"status": "Accepted"}))
+    command_service = RemoteCommandService(
+        presence, InMemoryCommandLogStore(), transport, InMemoryFirmwareUpdateStore()
+    )
+    session_map = InMemorySessionChargerMap()
+    transaction_repo = InMemoryTransactionRepository()
+    service = OcpiCommandService(session_map, transaction_repo, command_service)
+    return service, presence, transport, session_map, transaction_repo
+
+
+def test_start_session_endpoint_returns_a_session_id_on_acceptance():
+    service, presence, *_ = _build_ocpi_command_app_pieces()
+    asyncio.run(presence.mark_online("CP-1", TENANT_ID, node_id="node-a", protocol_version="ocpp1.6", ttl_seconds=600))
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), ocpi_command_service=service))
+
+    response = client.post(
+        "/ocpi/2.2.1/commands/START_SESSION",
+        json={"tenant_id": str(TENANT_ID), "location_id": "CP-1", "token_uid": "TAG-1", "connector_id": 1},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result"] == "ACCEPTED"
+    assert body["session_id"] is not None
+
+
+def test_start_session_endpoint_offline_charger_is_rejected():
+    service, *_ = _build_ocpi_command_app_pieces()
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), ocpi_command_service=service))
+
+    response = client.post(
+        "/ocpi/2.2.1/commands/START_SESSION",
+        json={"tenant_id": str(TENANT_ID), "location_id": "CP-1", "token_uid": "TAG-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "REJECTED"
+
+
+def test_stop_session_endpoint_unknown_session_returns_unknown_session():
+    service, *_ = _build_ocpi_command_app_pieces()
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), ocpi_command_service=service))
+
+    response = client.post(
+        "/ocpi/2.3.0/commands/STOP_SESSION", json={"tenant_id": str(TENANT_ID), "session_id": "no-such-session"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "UNKNOWN_SESSION"
+
+
+def test_reserve_now_endpoint_dispatches_and_accepts():
+    service, presence, *_ = _build_ocpi_command_app_pieces()
+    asyncio.run(presence.mark_online("CP-1", TENANT_ID, node_id="node-a", protocol_version="ocpp1.6", ttl_seconds=600))
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), ocpi_command_service=service))
+
+    response = client.post(
+        "/ocpi/2.2.1/commands/RESERVE_NOW",
+        json={
+            "tenant_id": str(TENANT_ID), "location_id": "CP-1", "token_uid": "TAG-1",
+            "expiry_date": "2026-08-01T00:00:00Z", "reservation_id": "RES-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "ACCEPTED"
+
+
+def test_unlock_connector_endpoint_dispatches_and_accepts():
+    service, presence, *_ = _build_ocpi_command_app_pieces()
+    asyncio.run(presence.mark_online("CP-1", TENANT_ID, node_id="node-a", protocol_version="ocpp1.6", ttl_seconds=600))
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), ocpi_command_service=service))
+
+    response = client.post(
+        "/ocpi/2.2.1/commands/UNLOCK_CONNECTOR",
+        json={"tenant_id": str(TENANT_ID), "location_id": "CP-1", "connector_id": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "ACCEPTED"
+
+
+def test_cancel_reservation_endpoint_dispatches_and_accepts():
+    service, presence, *_ = _build_ocpi_command_app_pieces()
+    asyncio.run(presence.mark_online("CP-1", TENANT_ID, node_id="node-a", protocol_version="ocpp1.6", ttl_seconds=600))
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), ocpi_command_service=service))
+
+    response = client.post(
+        "/ocpi/2.3.0/commands/CANCEL_RESERVATION",
+        json={"tenant_id": str(TENANT_ID), "location_id": "CP-1", "reservation_id": "RES-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "ACCEPTED"

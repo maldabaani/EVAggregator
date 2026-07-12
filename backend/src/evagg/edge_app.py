@@ -60,8 +60,14 @@ async def _session_charger_map():
     return services.session_charger_map
 
 
+async def _ocpi_command_service():
+    return services.ocpi_command_service
+
+
 app.include_router(
-    build_ocpi_router(_partner_registry, _location_repository, _tariff_catalog, _charging_profile_service)
+    build_ocpi_router(
+        _partner_registry, _location_repository, _tariff_catalog, _charging_profile_service, _ocpi_command_service
+    )
 )
 app.include_router(build_admin_router(_partner_registry, _reconciliation_store, _session_charger_map))
 app.include_router(

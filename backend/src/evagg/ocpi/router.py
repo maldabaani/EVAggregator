@@ -8,6 +8,7 @@ architecture Task 1.1 owns.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, FastAPI, Header
@@ -15,6 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from evagg.ocpi.charging_profiles import ChargingProfilePeriod, ChargingProfileService
+from evagg.ocpi.commands import OcpiCommandResult, OcpiCommandService
 from evagg.ocpi.errors import OcpiError, OcpiErrorCode
 from evagg.ocpi.locations import LocationRepository
 from evagg.ocpi.partner_store import PartnerRegistry
@@ -23,6 +25,48 @@ from evagg.ocpi.v211_shim.adapters import location_to_v211, tariff_to_v211
 from evagg.ocpi.v221.adapters import location_to_v221, tariff_to_v221
 from evagg.ocpi.v230.adapters import location_to_v230, tariff_to_v230
 from evagg.ocpi.versions import build_versions_response, negotiate_credentials
+
+
+class StartSessionRequest(BaseModel):
+    tenant_id: uuid.UUID
+    location_id: str
+    token_uid: str
+    connector_id: int = 1
+    response_url: str | None = None
+
+
+class StopSessionRequest(BaseModel):
+    tenant_id: uuid.UUID
+    session_id: str
+    response_url: str | None = None
+
+
+class ReserveNowRequest(BaseModel):
+    tenant_id: uuid.UUID
+    location_id: str
+    token_uid: str
+    expiry_date: datetime
+    reservation_id: str
+    connector_id: int = 1
+    response_url: str | None = None
+
+
+class UnlockConnectorRequest(BaseModel):
+    tenant_id: uuid.UUID
+    location_id: str
+    connector_id: int = 1
+    response_url: str | None = None
+
+
+class CancelReservationRequest(BaseModel):
+    tenant_id: uuid.UUID
+    location_id: str
+    reservation_id: str
+    response_url: str | None = None
+
+
+def _command_result_dict(result: OcpiCommandResult) -> dict:
+    return {"result": result.result.value, "session_id": result.session_id, "reason": result.reason}
 
 
 class _ChargingProfilePeriodPayload(BaseModel):
@@ -66,6 +110,7 @@ def build_ocpi_router(
     location_repository_dependency,
     tariff_catalog_dependency,
     charging_profile_service_dependency,
+    command_service_dependency,
     base_url: str = "https://api.example.com/ocpi",
 ) -> APIRouter:
     router = APIRouter(prefix="/ocpi")
@@ -228,5 +273,49 @@ def build_ocpi_router(
         session_id: str, service: ChargingProfileService = Depends(charging_profile_service_dependency)
     ) -> dict:
         return await _get_charging_profile(session_id, service)
+
+    # --- Commands (2.2.1+ only — not part of the 2.1.1 module set) ---------
+
+    def _register_commands(version: str) -> None:
+        @router.post(f"/{version}/commands/START_SESSION", name=f"start_session_{version}")
+        async def start_session(
+            body: StartSessionRequest, service: OcpiCommandService = Depends(command_service_dependency)
+        ) -> dict:
+            result = await service.start_session(body.location_id, body.tenant_id, body.token_uid, body.connector_id)
+            return _command_result_dict(result)
+
+        @router.post(f"/{version}/commands/STOP_SESSION", name=f"stop_session_{version}")
+        async def stop_session(
+            body: StopSessionRequest, service: OcpiCommandService = Depends(command_service_dependency)
+        ) -> dict:
+            result = await service.stop_session(body.session_id, body.tenant_id)
+            return _command_result_dict(result)
+
+        @router.post(f"/{version}/commands/RESERVE_NOW", name=f"reserve_now_{version}")
+        async def reserve_now(
+            body: ReserveNowRequest, service: OcpiCommandService = Depends(command_service_dependency)
+        ) -> dict:
+            result = await service.reserve_now(
+                body.location_id, body.tenant_id, body.token_uid, body.expiry_date, body.reservation_id,
+                body.connector_id,
+            )
+            return _command_result_dict(result)
+
+        @router.post(f"/{version}/commands/UNLOCK_CONNECTOR", name=f"unlock_connector_{version}")
+        async def unlock_connector(
+            body: UnlockConnectorRequest, service: OcpiCommandService = Depends(command_service_dependency)
+        ) -> dict:
+            result = await service.unlock_connector(body.location_id, body.tenant_id, body.connector_id)
+            return _command_result_dict(result)
+
+        @router.post(f"/{version}/commands/CANCEL_RESERVATION", name=f"cancel_reservation_{version}")
+        async def cancel_reservation(
+            body: CancelReservationRequest, service: OcpiCommandService = Depends(command_service_dependency)
+        ) -> dict:
+            result = await service.cancel_reservation(body.location_id, body.tenant_id, body.reservation_id)
+            return _command_result_dict(result)
+
+    _register_commands("2.2.1")
+    _register_commands("2.3.0")
 
     return router

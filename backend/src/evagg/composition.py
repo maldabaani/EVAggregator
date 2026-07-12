@@ -70,6 +70,7 @@ from evagg.ocpi.locations import InMemoryLocationRepository
 from evagg.ocpi.partner_admin import InMemoryReconciliationResultStore
 from evagg.ocpi.partner_store import InMemoryPartnerRegistry
 from evagg.ocpi.session_sync import HttpSessionPushClient, InMemorySessionPushClient, SessionPushClient
+from evagg.ocpi.tariff_bridge import OcpiTariffCatalog
 from evagg.ocpp_gateway.authorize import AuthStatus, Authorizer, InMemoryLocalIdTagStore, InMemoryRoamingTokenChecker
 from evagg.ocpp_gateway.commands import (
     CommandLogStore,
@@ -151,6 +152,7 @@ class Services:
 
     location_repository: InMemoryLocationRepository
     partner_registry: InMemoryPartnerRegistry
+    tariff_catalog: OcpiTariffCatalog
     reconciliation_store: InMemoryReconciliationResultStore
     partner_push_client: PartnerPushClient
     session_push_client: SessionPushClient
@@ -259,6 +261,7 @@ def build_services() -> Services:
     location_repository = InMemoryLocationRepository()
     partner_registry = InMemoryPartnerRegistry()
     reconciliation_store = InMemoryReconciliationResultStore()
+    tariff_catalog = OcpiTariffCatalog(tariff_service, settings.ocpi_party_id, settings.ocpi_country_code)
     # Constructed but not yet wired to live event-bus consumption — see
     # module docstring's "what app_mode doesn't control" for location_sync/
     # session_sync's own separate pending-wiring note.
@@ -350,6 +353,7 @@ def build_services() -> Services:
         autocharge_mac_store=autocharge_mac_store,
         location_repository=location_repository,
         partner_registry=partner_registry,
+        tariff_catalog=tariff_catalog,
         reconciliation_store=reconciliation_store,
         partner_push_client=partner_push_client,
         session_push_client=session_push_client,

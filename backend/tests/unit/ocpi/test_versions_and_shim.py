@@ -12,16 +12,23 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
+from evagg.billing.tariffs import InMemoryTariffStore, InMemoryTenantCurrencyProvider, TariffService
 from evagg.ocpi.domain import OCPIGeoLocation, OCPILocation
 from evagg.ocpi.errors import OcpiErrorCode, map_exception_to_ocpi_error
 from evagg.ocpi.locations import InMemoryLocationRepository
 from evagg.ocpi.partner_store import InMemoryPartnerRegistry, Partner
 from evagg.ocpi.router import build_ocpi_router, register_ocpi_exception_handlers
+from evagg.ocpi.tariff_bridge import OcpiTariffCatalog
 from evagg.ocpi.v221.adapters import location_to_v221
 from evagg.ocpi.v230.adapters import location_to_v230
 from evagg.ocpi.versions import SUPPORTED_VERSIONS, negotiate_credentials
 
 TENANT_ID = uuid.uuid4()
+
+
+def _build_tariff_catalog(tariff_service: TariffService | None = None) -> OcpiTariffCatalog:
+    service = tariff_service or TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider())
+    return OcpiTariffCatalog(service, party_id="EVG", country_code="US")
 
 
 def _sample_location() -> OCPILocation:
@@ -40,7 +47,7 @@ def _sample_location() -> OCPILocation:
     )
 
 
-def _build_app(partner_registry, location_repo) -> FastAPI:
+def _build_app(partner_registry, location_repo, tariff_catalog=None) -> FastAPI:
     app = FastAPI()
     register_ocpi_exception_handlers(app)
 
@@ -50,7 +57,10 @@ def _build_app(partner_registry, location_repo) -> FastAPI:
     async def get_location_repo():
         return location_repo
 
-    app.include_router(build_ocpi_router(get_partner_registry, get_location_repo))
+    async def get_tariff_catalog():
+        return tariff_catalog or _build_tariff_catalog()
+
+    app.include_router(build_ocpi_router(get_partner_registry, get_location_repo, get_tariff_catalog))
     return app
 
 
@@ -189,3 +199,88 @@ def test_unknown_partner_token_returns_2004_unknown_token():
 
     assert response.status_code == 401
     assert response.json()["status_code"] == int(OcpiErrorCode.UNKNOWN_TOKEN)
+
+
+# --- Tariffs module (bilateral GET only) ------------------------------------
+
+
+async def _seeded_tariff_service() -> TariffService:
+    service = TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider())
+    from evagg.billing.tariff_calculator import TariffComponentInput
+
+    await service.create_tariff(
+        TENANT_ID,
+        "Standard",
+        [
+            TariffComponentInput(type="energy", price_minor_units=35, step_size=1000),
+            TariffComponentInput(type="flat", price_minor_units=100),
+        ],
+    )
+    return service
+
+
+def test_list_tariffs_v211_returns_the_bare_v211_shape():
+    import asyncio
+
+    service = asyncio.run(_seeded_tariff_service())
+    catalog = _build_tariff_catalog(service)
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), catalog))
+
+    response = client.get("/ocpi/2.1.1/tariffs")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 1
+    assert data[0]["currency"] == "USD"
+    assert "elements" not in data[0]  # 2.1.1 shim stays minimal, per its own docstring
+
+
+def test_list_tariffs_v221_includes_price_components():
+    import asyncio
+
+    service = asyncio.run(_seeded_tariff_service())
+    catalog = _build_tariff_catalog(service)
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), catalog))
+
+    response = client.get("/ocpi/2.2.1/tariffs")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 1
+    assert data[0]["party_id"] == "EVG"
+    assert data[0]["country_code"] == "US"
+    components = data[0]["elements"][0]["price_components"]
+    assert {"type": "ENERGY", "price": 0.35, "step_size": 1000} in components
+    assert {"type": "FLAT", "price": 1.0, "step_size": 1} in components
+
+
+def test_get_tariff_v230_by_id():
+    import asyncio
+
+    service = asyncio.run(_seeded_tariff_service())
+    tariff_id = asyncio.run(service.list_all_tariffs())[0].id
+    catalog = _build_tariff_catalog(service)
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), catalog))
+
+    response = client.get(f"/ocpi/2.3.0/tariffs/{tariff_id}")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == str(tariff_id)
+
+
+def test_get_unknown_tariff_returns_2005_unknown_tariff():
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository()))
+
+    response = client.get(f"/ocpi/2.2.1/tariffs/{uuid.uuid4()}")
+
+    assert response.status_code == 404
+    assert response.json()["status_code"] == int(OcpiErrorCode.UNKNOWN_TARIFF)
+
+
+def test_get_tariff_with_malformed_id_returns_2005_not_500():
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository()))
+
+    response = client.get("/ocpi/2.2.1/tariffs/not-a-uuid")
+
+    assert response.status_code == 404
+    assert response.json()["status_code"] == int(OcpiErrorCode.UNKNOWN_TARIFF)

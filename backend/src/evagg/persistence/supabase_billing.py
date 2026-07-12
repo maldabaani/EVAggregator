@@ -46,6 +46,14 @@ class SupabaseTariffStore:
         row = await self._client.select_one("tariff", {"id": str(tariff_id)})
         if row is None:
             return None
+        return await self._hydrate(row)
+
+    async def list_all(self) -> list[Tariff]:
+        rows = await self._client.select("tariff")
+        return [await self._hydrate(row) for row in rows]
+
+    async def _hydrate(self, row: dict) -> Tariff:
+        tariff_id = uuid.UUID(row["id"])
         component_rows = await self._client.select("tariff_component", {"tariff_id": str(tariff_id)})
         components = [
             TariffComponentInput(

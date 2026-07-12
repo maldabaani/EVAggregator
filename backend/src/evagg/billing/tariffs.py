@@ -33,6 +33,8 @@ class TariffStore(Protocol):
 
     async def get(self, tariff_id: uuid.UUID) -> Tariff | None: ...
 
+    async def list_all(self) -> list[Tariff]: ...
+
 
 class InMemoryTariffStore:
     def __init__(self) -> None:
@@ -55,6 +57,9 @@ class InMemoryTariffStore:
 
     async def get(self, tariff_id: uuid.UUID) -> Tariff | None:
         return self._tariffs.get(tariff_id)
+
+    async def list_all(self) -> list[Tariff]:
+        return list(self._tariffs.values())
 
 
 class TenantCurrencyProvider(Protocol):
@@ -94,3 +99,9 @@ class TariffService:
         if tariff is None:
             raise TariffNotFoundError(str(tariff_id))
         return calculate_session_cost(tariff.components, duration_minutes, kwh, idle_minutes)
+
+    async def list_all_tariffs(self) -> list[Tariff]:
+        return await self._store.list_all()
+
+    async def get_tariff(self, tariff_id: uuid.UUID) -> Tariff | None:
+        return await self._store.get(tariff_id)

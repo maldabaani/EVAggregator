@@ -4,8 +4,14 @@ wire schemas. Business logic never lives here — this is a pure mapping layer.
 
 from __future__ import annotations
 
-from evagg.ocpi.domain import OCPIGeoLocation, OCPILocation
-from evagg.ocpi.v221.models import GeoLocationV221, LocationV221
+from evagg.ocpi.domain import OCPIGeoLocation, OCPILocation, OCPITariff
+from evagg.ocpi.v221.models import (
+    GeoLocationV221,
+    LocationV221,
+    PriceComponentV221,
+    TariffElementV221,
+    TariffV221,
+)
 
 
 def location_to_v221(location: OCPILocation) -> LocationV221:
@@ -39,4 +45,23 @@ def location_from_v221(payload: LocationV221) -> OCPILocation:
         country=payload.country,
         coordinates=OCPIGeoLocation(latitude=payload.coordinates.latitude, longitude=payload.coordinates.longitude),
         last_updated=payload.last_updated,
+    )
+
+
+def tariff_to_v221(tariff: OCPITariff) -> TariffV221:
+    return TariffV221(
+        id=tariff.id,
+        party_id=tariff.party_id,
+        country_code=tariff.country_code,
+        currency=tariff.currency,
+        elements=[
+            TariffElementV221(
+                price_components=[
+                    PriceComponentV221(type=pc.type, price=pc.price, step_size=pc.step_size)
+                    for pc in element.price_components
+                ]
+            )
+            for element in tariff.elements
+        ],
+        last_updated=tariff.last_updated,
     )

@@ -14,9 +14,10 @@ from fastapi.responses import JSONResponse
 from evagg.ocpi.errors import OcpiError, OcpiErrorCode
 from evagg.ocpi.locations import LocationRepository
 from evagg.ocpi.partner_store import PartnerRegistry
-from evagg.ocpi.v211_shim.adapters import location_to_v211
-from evagg.ocpi.v221.adapters import location_to_v221
-from evagg.ocpi.v230.adapters import location_to_v230
+from evagg.ocpi.tariff_bridge import OcpiTariffCatalog
+from evagg.ocpi.v211_shim.adapters import location_to_v211, tariff_to_v211
+from evagg.ocpi.v221.adapters import location_to_v221, tariff_to_v221
+from evagg.ocpi.v230.adapters import location_to_v230, tariff_to_v230
 from evagg.ocpi.versions import build_versions_response, negotiate_credentials
 
 
@@ -29,6 +30,7 @@ def register_ocpi_exception_handlers(app: FastAPI) -> None:
 def build_ocpi_router(
     partner_registry_dependency,
     location_repository_dependency,
+    tariff_catalog_dependency,
     base_url: str = "https://api.example.com/ocpi",
 ) -> APIRouter:
     router = APIRouter(prefix="/ocpi")
@@ -61,6 +63,20 @@ def build_ocpi_router(
             raise OcpiError(OcpiErrorCode.UNKNOWN_LOCATION, f"unknown location: {location_id}")
         return location_to_v211(location).model_dump(mode="json")
 
+    @router.get("/2.1.1/tariffs")
+    async def list_tariffs_v211(catalog: OcpiTariffCatalog = Depends(tariff_catalog_dependency)) -> dict:
+        tariffs = await catalog.list_all()
+        return {"data": [tariff_to_v211(t).model_dump(mode="json") for t in tariffs]}
+
+    @router.get("/2.1.1/tariffs/{tariff_id}")
+    async def get_tariff_v211(
+        tariff_id: str, catalog: OcpiTariffCatalog = Depends(tariff_catalog_dependency)
+    ) -> dict:
+        tariff = await catalog.get(tariff_id)
+        if tariff is None:
+            raise OcpiError(OcpiErrorCode.UNKNOWN_TARIFF, f"unknown tariff: {tariff_id}")
+        return tariff_to_v211(tariff).model_dump(mode="json")
+
     @router.put("/2.1.1/tokens/{token_uid}")
     @router.patch("/2.1.1/tokens/{token_uid}")
     async def reject_v211_token_write(token_uid: str) -> JSONResponse:
@@ -88,6 +104,20 @@ def build_ocpi_router(
             raise OcpiError(OcpiErrorCode.UNKNOWN_LOCATION, f"unknown location: {location_id}")
         return location_to_v221(location).model_dump(mode="json")
 
+    @router.get("/2.2.1/tariffs")
+    async def list_tariffs_v221(catalog: OcpiTariffCatalog = Depends(tariff_catalog_dependency)) -> dict:
+        tariffs = await catalog.list_all()
+        return {"data": [tariff_to_v221(t).model_dump(mode="json") for t in tariffs]}
+
+    @router.get("/2.2.1/tariffs/{tariff_id}")
+    async def get_tariff_v221(
+        tariff_id: str, catalog: OcpiTariffCatalog = Depends(tariff_catalog_dependency)
+    ) -> dict:
+        tariff = await catalog.get(tariff_id)
+        if tariff is None:
+            raise OcpiError(OcpiErrorCode.UNKNOWN_TARIFF, f"unknown tariff: {tariff_id}")
+        return tariff_to_v221(tariff).model_dump(mode="json")
+
     # --- 2.3.0 (forward compatibility) ----------------------------------
 
     @router.get("/2.3.0/locations/{location_id}")
@@ -98,5 +128,19 @@ def build_ocpi_router(
         if location is None:
             raise OcpiError(OcpiErrorCode.UNKNOWN_LOCATION, f"unknown location: {location_id}")
         return location_to_v230(location).model_dump(mode="json")
+
+    @router.get("/2.3.0/tariffs")
+    async def list_tariffs_v230(catalog: OcpiTariffCatalog = Depends(tariff_catalog_dependency)) -> dict:
+        tariffs = await catalog.list_all()
+        return {"data": [tariff_to_v230(t).model_dump(mode="json") for t in tariffs]}
+
+    @router.get("/2.3.0/tariffs/{tariff_id}")
+    async def get_tariff_v230(
+        tariff_id: str, catalog: OcpiTariffCatalog = Depends(tariff_catalog_dependency)
+    ) -> dict:
+        tariff = await catalog.get(tariff_id)
+        if tariff is None:
+            raise OcpiError(OcpiErrorCode.UNKNOWN_TARIFF, f"unknown tariff: {tariff_id}")
+        return tariff_to_v230(tariff).model_dump(mode="json")
 
     return router

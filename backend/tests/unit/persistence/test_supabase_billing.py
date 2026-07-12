@@ -37,6 +37,21 @@ async def test_tariff_get_missing_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_tariff_list_all_returns_every_created_tariff_with_components():
+    client, _ = build_client_with_fake(SupabaseRestClient)
+    store = SupabaseTariffStore(client)
+    first = await store.create(TENANT_ID, "Standard", "USD", [TariffComponentInput(type="energy", price_minor_units=50)])
+    second = await store.create(TENANT_ID, "Peak", "USD", [TariffComponentInput(type="flat", price_minor_units=1000)])
+
+    tariffs = await store.list_all()
+
+    assert {t.id for t in tariffs} == {first.id, second.id}
+    by_id = {t.id: t for t in tariffs}
+    assert by_id[first.id].components[0].type == "energy"
+    assert by_id[second.id].components[0].type == "flat"
+
+
+@pytest.mark.asyncio
 async def test_tariff_update_replaces_components():
     client, _ = build_client_with_fake(SupabaseRestClient)
     store = SupabaseTariffStore(client)

@@ -48,7 +48,11 @@ async def _reconciliation_store():
     return services.reconciliation_store
 
 
-app.include_router(build_ocpi_router(_partner_registry, _location_repository))
+async def _tariff_catalog():
+    return services.tariff_catalog
+
+
+app.include_router(build_ocpi_router(_partner_registry, _location_repository, _tariff_catalog))
 app.include_router(build_admin_router(_partner_registry, _reconciliation_store))
 app.include_router(
     build_ocpp_ws_router(services.connection_manager, services.message_handlers, services.live_connections)

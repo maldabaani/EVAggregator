@@ -30,3 +30,22 @@ class LocationV230(BaseModel):
     coordinates: GeoLocationV230
     facilities: list[str] | None = None
     last_updated: datetime
+
+
+class PriceComponentV230(BaseModel):
+    type: str
+    price: float
+    step_size: int
+
+
+class TariffElementV230(BaseModel):
+    price_components: list[PriceComponentV230]
+
+
+class TariffV230(BaseModel):
+    id: str
+    party_id: str
+    country_code: str
+    currency: str
+    elements: list[TariffElementV230]
+    last_updated: datetime

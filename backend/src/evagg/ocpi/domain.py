@@ -35,11 +35,27 @@ class OCPILocation(BaseModel):
     evse_status: str | None = None
 
 
+class OCPIPriceComponent(BaseModel):
+    type: str  # 'ENERGY' | 'TIME' | 'FLAT' | 'PARKING_TIME'
+    price: float  # major currency units, per OCPI convention (internal storage is minor units)
+    step_size: int
+
+
+class OCPITariffElement(BaseModel):
+    price_components: list[OCPIPriceComponent]
+    # No `restrictions` — the internal Tariff model (Task 3.1) has no
+    # time-of-day/day-of-week/min-max-kwh conditions to map from, so every
+    # tariff is a single unconditional element. A genuinely conditional
+    # internal tariff would need its own restrictions concept before this
+    # could carry more than one element.
+
+
 class OCPITariff(BaseModel):
     id: str
     party_id: str
     country_code: str
     currency: str
+    elements: list[OCPITariffElement]
     last_updated: datetime
 
 

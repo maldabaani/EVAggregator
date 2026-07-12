@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     ocpi_partner_push_base_url: str = "https://partner.example.com/ocpi"
     ocpi_partner_push_token: str = "dev_only_replace_me"
 
+    # This CPO's own OCPI party identity — every OCPI object we publish
+    # (Locations, Tariffs, ...) is namespaced under it. Bilateral roaming
+    # only (Task 1.3's chosen topology): one party identity is enough, since
+    # there's no hub relaying our catalog to parties we've never negotiated
+    # credentials with directly.
+    ocpi_party_id: str = "EVG"
+    ocpi_country_code: str = "US"
+
     # `memory`: every domain store (tariffs, wallet, OCPP chargers/
     # transactions/connectors/credentials/meter-values) is in-process and
     # lost on restart — the default, and the only thing most of this app has

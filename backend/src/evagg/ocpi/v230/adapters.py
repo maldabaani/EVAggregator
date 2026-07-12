@@ -5,8 +5,14 @@ wire schemas — a separate adapter from v221's, but both read/write the same
 
 from __future__ import annotations
 
-from evagg.ocpi.domain import OCPIGeoLocation, OCPILocation
-from evagg.ocpi.v230.models import GeoLocationV230, LocationV230
+from evagg.ocpi.domain import OCPIGeoLocation, OCPILocation, OCPITariff
+from evagg.ocpi.v230.models import (
+    GeoLocationV230,
+    LocationV230,
+    PriceComponentV230,
+    TariffElementV230,
+    TariffV230,
+)
 
 
 def location_to_v230(location: OCPILocation) -> LocationV230:
@@ -41,4 +47,23 @@ def location_from_v230(payload: LocationV230) -> OCPILocation:
         country=payload.country,
         coordinates=OCPIGeoLocation(latitude=payload.coordinates.latitude, longitude=payload.coordinates.longitude),
         last_updated=payload.last_updated,
+    )
+
+
+def tariff_to_v230(tariff: OCPITariff) -> TariffV230:
+    return TariffV230(
+        id=tariff.id,
+        party_id=tariff.party_id,
+        country_code=tariff.country_code,
+        currency=tariff.currency,
+        elements=[
+            TariffElementV230(
+                price_components=[
+                    PriceComponentV230(type=pc.type, price=pc.price, step_size=pc.step_size)
+                    for pc in element.price_components
+                ]
+            )
+            for element in tariff.elements
+        ],
+        last_updated=tariff.last_updated,
     )

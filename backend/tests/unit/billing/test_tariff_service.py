@@ -82,3 +82,22 @@ async def test_editing_a_saved_tariff_does_not_change_its_currency():
 
     assert updated.currency == "AED"
     assert updated.name == "Renamed"
+
+
+@pytest.mark.asyncio
+async def test_list_all_tariffs_returns_every_created_tariff():
+    service, _, _ = _build_service()
+    components = [TariffComponentInput(type="energy", price_minor_units=150, step_size=1)]
+    first = await service.create_tariff(TENANT_ID, "First", components)
+    second = await service.create_tariff(TENANT_ID, "Second", components)
+
+    tariffs = await service.list_all_tariffs()
+
+    assert {t.id for t in tariffs} == {first.id, second.id}
+
+
+@pytest.mark.asyncio
+async def test_get_tariff_returns_none_for_unknown_id():
+    service, _, _ = _build_service()
+
+    assert await service.get_tariff(uuid.uuid4()) is None

@@ -28,3 +28,22 @@ class LocationV221(BaseModel):
     country: str
     coordinates: GeoLocationV221
     last_updated: datetime
+
+
+class PriceComponentV221(BaseModel):
+    type: str
+    price: float
+    step_size: int
+
+
+class TariffElementV221(BaseModel):
+    price_components: list[PriceComponentV221]
+
+
+class TariffV221(BaseModel):
+    id: str
+    party_id: str
+    country_code: str
+    currency: str
+    elements: list[TariffElementV221]
+    last_updated: datetime

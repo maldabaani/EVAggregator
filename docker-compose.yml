@@ -43,6 +43,13 @@ services:
       EVAGG_MIGRATION_DATABASE_URL: postgresql+asyncpg://evagg:evagg@postgres:5432/evagg
       EVAGG_REDIS_URL: redis://redis:6379/0
       EVAGG_NATS_URL: nats://nats:4222
+      # memory (default) needs nothing below — set a root-level .env (or
+      # export these before `docker compose up`) to point backend-main/
+      # backend-edge at Supabase instead. See docs/supabase/schema.sql and
+      # docs/production_readiness.md.
+      EVAGG_PERSISTENCE_BACKEND: ${EVAGG_PERSISTENCE_BACKEND:-memory}
+      EVAGG_SUPABASE_URL: ${EVAGG_SUPABASE_URL:-https://project.supabase.co}
+      EVAGG_SUPABASE_API_KEY: ${EVAGG_SUPABASE_API_KEY:-dev_only_replace_me}
     depends_on:
       postgres:
         condition: service_healthy

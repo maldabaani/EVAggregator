@@ -31,6 +31,12 @@ in-process mock, so nothing needs a third-party account to click around.
 Set `EVAGG_APP_MODE=production` to swap in the real adapters — see
 `docs/production_readiness.md` for exactly what that still needs.
 
+Persistence defaults to `EVAGG_PERSISTENCE_BACKEND=memory` here too. To
+point `backend-main`/`backend-edge` at Supabase instead, export
+`EVAGG_PERSISTENCE_BACKEND=supabase`, `EVAGG_SUPABASE_URL`, and
+`EVAGG_SUPABASE_API_KEY` before `docker compose up` (or put them in a
+root-level `.env` — compose reads it automatically).
+
 ## Backend quickstart (without Docker)
 
 ```bash

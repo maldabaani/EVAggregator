@@ -1,0 +1,55 @@
+"""FastAPI app entrypoint — the "edge" app for the two trust boundaries that
+are NOT tenant-header-authenticated: OCPI (roaming partners call this
+directly, authenticated by their own OCPI bearer token) and the OCPP
+WebSocket (charge points connect directly, authenticated by their own
+per-charger credential in the handshake). Neither belongs on `evagg.main`,
+which requires a gateway-signed `X-Tenant-Id` header no partner or charge
+point ever sends.
+"""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from evagg.composition import build_services, shutdown_services, startup_services
+from evagg.core.observability import configure_logging, instrument_app
+from evagg.ocpi.admin_router import build_admin_router
+from evagg.ocpi.router import build_ocpi_router, register_ocpi_exception_handlers
+from evagg.ocpp_gateway.ws_app import build_ocpp_ws_router
+
+configure_logging()
+services = build_services()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await startup_services(services)
+    try:
+        yield
+    finally:
+        await shutdown_services(services)
+
+
+app = FastAPI(title="EV Charging Aggregator Platform Edge Services", version="0.1.0", lifespan=lifespan)
+register_ocpi_exception_handlers(app)
+
+
+async def _partner_registry():
+    return services.partner_registry
+
+
+async def _location_repository():
+    return services.location_repository
+
+
+async def _reconciliation_store():
+    return services.reconciliation_store
+
+
+app.include_router(build_ocpi_router(_partner_registry, _location_repository))
+app.include_router(build_admin_router(_partner_registry, _reconciliation_store))
+app.include_router(build_ocpp_ws_router(services.connection_manager, services.message_handlers))
+
+instrument_app(app, services.redis_client)

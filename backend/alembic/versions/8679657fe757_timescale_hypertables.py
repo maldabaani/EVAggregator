@@ -37,8 +37,42 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+_PLAIN_ROLLUP_QUERY = """
+    SELECT
+        tenant_id,
+        charger_id,
+        transaction_id,
+        measurand,
+        unit,
+        date_trunc('hour', ts) AS bucket,
+        avg(value) AS avg_value,
+        max(value) AS max_value,
+        min(value) AS min_value,
+        count(*) AS sample_count
+    FROM meter_value
+    GROUP BY tenant_id, charger_id, transaction_id, measurand, unit, bucket
+"""
+
+
+def _timescaledb_available(bind) -> bool:
+    """Testing-mode machines (this sandbox included) can't reach
+    TimescaleDB's package repo, so the extension is never installed there —
+    only a real deployment (or CI's docker-compose service) has it. Rather
+    than hard-fail `alembic upgrade head` on every dev machine, detect
+    availability and fall back to a plain Postgres table + a plain (not
+    continuously-refreshed) view with the same name and shape. Functionally
+    identical for reads; just not incrementally materialized or chunked."""
+    return bind.execute(
+        text("SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'")
+    ).first() is not None
+
+
 def upgrade() -> None:
     bind = op.get_bind()
+
+    if not _timescaledb_available(bind):
+        op.execute(f"CREATE VIEW meter_value_hourly AS {_PLAIN_ROLLUP_QUERY}")
+        return
 
     bind.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
 
@@ -69,22 +103,10 @@ def upgrade() -> None:
     # statement, then Alembic resumes a normal transaction afterward.
     with op.get_context().autocommit_block():
         op.execute(
-            """
+            f"""
             CREATE MATERIALIZED VIEW meter_value_hourly
             WITH (timescaledb.continuous) AS
-            SELECT
-                tenant_id,
-                charger_id,
-                transaction_id,
-                measurand,
-                unit,
-                time_bucket(INTERVAL '1 hour', ts) AS bucket,
-                avg(value) AS avg_value,
-                max(value) AS max_value,
-                min(value) AS min_value,
-                count(*) AS sample_count
-            FROM meter_value
-            GROUP BY tenant_id, charger_id, transaction_id, measurand, unit, bucket
+            {_PLAIN_ROLLUP_QUERY}
             """
         )
     bind.execute(
@@ -98,4 +120,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    if not _timescaledb_available(bind):
+        op.execute("DROP VIEW IF EXISTS meter_value_hourly")
+        return
     bind.execute(text("DROP MATERIALIZED VIEW IF EXISTS meter_value_hourly CASCADE"))

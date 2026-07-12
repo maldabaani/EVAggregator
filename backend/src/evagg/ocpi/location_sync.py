@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Protocol
 
+import httpx
+
 from evagg.ocpi.domain import OCPILocation
 from evagg.ocpi.locations import LocationRepository
 
@@ -35,11 +37,53 @@ class PartnerPushClient(Protocol):
 
 
 class InMemoryPartnerPushClient:
+    """The `app_mode=testing` default — records pushes for assertions
+    instead of calling out to a real partner network."""
+
     def __init__(self) -> None:
         self.location_pushes: list[tuple[uuid.UUID, OCPILocation]] = []
 
     async def push_location_update(self, partner_id: uuid.UUID, location: OCPILocation) -> None:
         self.location_pushes.append((partner_id, location))
+
+
+class PartnerPushError(Exception):
+    pass
+
+
+class HttpPartnerPushClient:
+    """Real OCPI `PATCH /locations/{country_code}/{party_id}/{location_id}`
+    push — the `app_mode=production` implementation, pending real per-partner
+    base URLs and tokens.
+
+    OCPI's actual spec has each partner publish its own base URL during
+    credentials negotiation (Task 1.1's `versions`/`credentials` exchange),
+    which would mean looking one up per `partner_id` here rather than using
+    one shared `base_url`/`token` for every partner. That per-partner
+    endpoint store doesn't exist yet — this demonstrates the real transport
+    shape against a single configured endpoint (`settings.
+    ocpi_partner_push_base_url`/`ocpi_partner_push_token`) until it does.
+    """
+
+    def __init__(self, base_url: str, token: str, http_client: httpx.AsyncClient | None = None) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._token = token
+        self._http_client = http_client
+
+    async def push_location_update(self, partner_id: uuid.UUID, location: OCPILocation) -> None:
+        client = self._http_client or httpx.AsyncClient()
+        url = f"{self._base_url}/locations/{location.country_code}/{location.party_id}/{location.id}"
+        try:
+            response = await client.patch(
+                url,
+                json=location.model_dump(mode="json"),
+                headers={"Authorization": f"Token {self._token}"},
+            )
+        except httpx.HTTPError as exc:
+            raise PartnerPushError(f"partner {partner_id} unreachable: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise PartnerPushError(f"partner {partner_id} rejected location push (status {response.status_code})")
 
 
 class LocationSyncService:

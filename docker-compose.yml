@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16
@@ -33,6 +31,57 @@ services:
     ports:
       - "4222:4222"
       - "8222:8222"
+
+  migrate:
+    build:
+      context: ./backend
+    command: ["alembic", "upgrade", "head"]
+    environment: &backend_env
+      EVAGG_APP_MODE: testing
+      EVAGG_DATABASE_URL: postgresql+asyncpg://evagg_app:evagg_app@postgres:5432/evagg
+      EVAGG_SUPERADMIN_DATABASE_URL: postgresql+asyncpg://evagg_superadmin:evagg_superadmin@postgres:5432/evagg
+      EVAGG_MIGRATION_DATABASE_URL: postgresql+asyncpg://evagg:evagg@postgres:5432/evagg
+      EVAGG_REDIS_URL: redis://redis:6379/0
+      EVAGG_NATS_URL: nats://nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend-main:
+    build:
+      context: ./backend
+      args:
+        APP_MODULE: evagg.main:app
+    ports:
+      - "8000:8000"
+    environment: *backend_env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  backend-edge:
+    build:
+      context: ./backend
+      args:
+        APP_MODULE: evagg.edge_app:app
+    ports:
+      - "8090:8000"
+    environment: *backend_env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  portal:
+    build:
+      context: ./portal
+    ports:
+      - "4200:80"
+    depends_on:
+      - backend-main
 
 volumes:
   pgdata:

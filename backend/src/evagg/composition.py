@@ -1,0 +1,296 @@
+"""The composition root — the one place that wires every independently
+unit-tested service/store into a single set of running FastAPI apps.
+
+Until now, every task in this backlog shipped a service and a `build_x_router`
+factory, each covered by its own tests with in-memory or mocked dependencies,
+but nothing ever constructed a real instance of all of them together and
+mounted them on an app you could `uvicorn` and hit over HTTP. This module is
+that missing assembly step.
+
+**What `app_mode` does and doesn't control**
+
+`app_mode=testing` wires every external, third-party integration (Stripe,
+Electricity Maps, OCSP, OCPI partner push) to an in-process mock — no
+account, API key, or network access required for any of them. `production`
+swaps in the real adapters and calls `validate_production_config()` at
+startup, which raises if any of their settings are still holding a
+dev-only placeholder — it never silently falls back to a mock.
+
+It does **not** control persistence. Every domain store in this codebase
+(tariffs, wallet ledger, cost-report rollups, OCPI locations/partners, OCPP
+chargers/transactions/connectors/credentials/meter-values) only has an
+in-memory implementation — Task 6.1 built the Postgres schema, but no task
+ever built a repository against it. That's true in both modes today: state
+lives in the process and is lost on restart. Building real Postgres-backed
+repositories for these is the single largest remaining production-readiness
+item — see `docs/production_readiness.md`.
+
+Redis and NATS are real in both modes (they're free/local infra, not
+third-party accounts), so presence, rate limiting, the carbon cache, and the
+OCPP event bus all use their real backing service here.
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+
+import redis.asyncio as redis_asyncio
+
+from evagg.billing.payment_methods import InMemoryPaymentMethodStore
+from evagg.billing.payment_provider import PaymentProvider, StripePaymentProvider, StubPaymentProvider
+from evagg.billing.tariffs import InMemoryTariffStore, InMemoryTenantCurrencyProvider, TariffService
+from evagg.billing.wallet import InMemoryWalletLedgerStore, WalletService
+from evagg.carbon.cache import CarbonCache, RedisCarbonCache
+from evagg.carbon.provider import CarbonProvider, ElectricityMapsClient, MockCarbonProvider
+from evagg.carbon.service import CarbonIntensityService
+from evagg.carbon.zone_map import InMemoryCarbonZoneMap
+from evagg.charging_auth.autocharge import InMemoryAutochargeMacStore
+from evagg.charging_auth.plug_and_charge import (
+    HttpOcspChecker,
+    InMemoryEmaidDriverMap,
+    InMemoryOcspChecker,
+    OcspChecker,
+    PlugAndChargeValidator,
+)
+from evagg.charging_auth.session_start import SessionStartService
+from evagg.core.config import settings
+from evagg.fleet.cost_report import CostReportService
+from evagg.fleet.rollup import InMemoryRollupStore
+from evagg.gateway.rate_limit import RateLimiter, RedisRateLimiter
+from evagg.ocpi.location_sync import HttpPartnerPushClient, InMemoryPartnerPushClient, PartnerPushClient
+from evagg.ocpi.locations import InMemoryLocationRepository
+from evagg.ocpi.partner_admin import InMemoryReconciliationResultStore
+from evagg.ocpi.partner_store import InMemoryPartnerRegistry
+from evagg.ocpi.session_sync import HttpSessionPushClient, InMemorySessionPushClient, SessionPushClient
+from evagg.ocpp_gateway.authorize import AuthStatus, Authorizer, InMemoryLocalIdTagStore, InMemoryRoamingTokenChecker
+from evagg.ocpp_gateway.connection_manager import ConnectionManager
+from evagg.ocpp_gateway.connectors import InMemoryConnectorStore
+from evagg.ocpp_gateway.credentials import InMemoryCredentialVerifier
+from evagg.ocpp_gateway.event_bus import NatsEventBus
+from evagg.ocpp_gateway.bus_event_publisher import BusEventPublisher
+from evagg.ocpp_gateway.message_handlers import OcppMessageHandlers
+from evagg.ocpp_gateway.meter_values import InMemoryMeterValueSink, MeterValueBuffer
+from evagg.ocpp_gateway.presence import PresenceRegistry, RedisPresenceRegistry
+from evagg.ocpp_gateway.registration import InMemoryChargerRegistry
+from evagg.ocpp_gateway.transactions import InMemoryTransactionRepository
+
+
+class ProductionConfigError(Exception):
+    """Raised at startup in app_mode=production when a required real value
+    is still a dev-only placeholder."""
+
+
+_PLACEHOLDER_MARKERS = ("dev_only", "dev-only", "replace_me", "example.com")
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
+
+
+def validate_production_config() -> None:
+    """Fails fast rather than silently running with placeholder secrets
+    against real third-party endpoints."""
+    checks = {
+        "stripe_api_key": settings.stripe_api_key,
+        "stripe_webhook_secret": settings.stripe_webhook_secret,
+        "electricity_maps_api_key": settings.electricity_maps_api_key,
+        "ocsp_responder_url": settings.ocsp_responder_url,
+        "ocpi_partner_push_base_url": settings.ocpi_partner_push_base_url,
+        "ocpi_partner_push_token": settings.ocpi_partner_push_token,
+        "jwt_signing_secret": settings.jwt_signing_secret,
+        "gateway_trust_secret": settings.gateway_trust_secret,
+    }
+    placeholders = [name for name, value in checks.items() if _looks_like_placeholder(value)]
+    if placeholders:
+        raise ProductionConfigError(
+            "app_mode=production but these settings still hold dev-only placeholder values: "
+            + ", ".join(sorted(placeholders))
+        )
+
+
+@dataclass
+class Services:
+    """Every shared, process-lifetime service instance the apps mount
+    routers against. Built once by `build_services()`, imported by
+    `evagg.main`, `evagg.edge_app`, and `evagg.ocpp_gateway.ws_app`."""
+
+    tariff_service: TariffService
+    wallet_service: WalletService
+    carbon_service: CarbonIntensityService
+    cost_report_service: CostReportService
+    session_start_service: SessionStartService
+    plug_and_charge_validator: PlugAndChargeValidator
+    autocharge_mac_store: InMemoryAutochargeMacStore
+
+    location_repository: InMemoryLocationRepository
+    partner_registry: InMemoryPartnerRegistry
+    reconciliation_store: InMemoryReconciliationResultStore
+    partner_push_client: PartnerPushClient
+    session_push_client: SessionPushClient
+
+    presence_registry: PresenceRegistry
+    rate_limiter: RateLimiter
+    # Typed as the concrete `NatsEventBus`, not the `EventBus` Protocol —
+    # `startup_services`/`shutdown_services` call `connect()`/`close()`,
+    # which are a `NatsEventBus`-specific lifecycle, not part of the
+    # `EventBus` interface `BusEventPublisher` depends on.
+    event_bus: NatsEventBus
+    connection_manager: ConnectionManager
+    message_handlers: OcppMessageHandlers
+    credential_verifier: InMemoryCredentialVerifier
+
+    redis_client: redis_asyncio.Redis
+
+
+def _build_payment_provider() -> PaymentProvider:
+    if settings.app_mode == "production":
+        return StripePaymentProvider(api_key=settings.stripe_api_key, base_url=settings.stripe_base_url)
+    return StubPaymentProvider()
+
+
+def _build_carbon_provider() -> CarbonProvider:
+    if settings.app_mode == "production":
+        return ElectricityMapsClient(
+            api_key=settings.electricity_maps_api_key, base_url=settings.electricity_maps_base_url
+        )
+    return MockCarbonProvider()
+
+
+def _build_ocsp_checker() -> OcspChecker:
+    if settings.app_mode == "production":
+        return HttpOcspChecker(responder_url=settings.ocsp_responder_url)
+    return InMemoryOcspChecker()
+
+
+def _build_partner_push_client() -> PartnerPushClient:
+    if settings.app_mode == "production":
+        return HttpPartnerPushClient(settings.ocpi_partner_push_base_url, settings.ocpi_partner_push_token)
+    return InMemoryPartnerPushClient()
+
+
+def _build_session_push_client() -> SessionPushClient:
+    if settings.app_mode == "production":
+        return HttpSessionPushClient(settings.ocpi_partner_push_base_url, settings.ocpi_partner_push_token)
+    return InMemorySessionPushClient()
+
+
+def build_services() -> Services:
+    if settings.app_mode == "production":
+        validate_production_config()
+
+    redis_client = redis_asyncio.from_url(settings.redis_url)
+
+    # --- Billing -----------------------------------------------------
+    tariff_service = TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider())
+    wallet_service = WalletService(InMemoryWalletLedgerStore(), _build_payment_provider())
+
+    # --- Carbon --------------------------------------------------------
+    zone_map = InMemoryCarbonZoneMap()
+    for country, area, provider_zone in (("AE", "DXB", "AE"), ("GB", "LON", "GB"), ("US", "CAISO", "US-CAL-CISO")):
+        zone_map.set_mapping(country, area, provider_zone)
+    carbon_cache: CarbonCache = RedisCarbonCache(redis_client)
+    carbon_service = CarbonIntensityService(
+        zone_map, _build_carbon_provider(), carbon_cache, ttl_seconds=settings.carbon_intensity_cache_ttl_seconds
+    )
+
+    # --- Fleet -----------------------------------------------------------
+    cost_report_service = CostReportService(InMemoryRollupStore())
+
+    # --- Charging auth ---------------------------------------------------
+    autocharge_mac_store = InMemoryAutochargeMacStore()
+    plug_and_charge_validator = PlugAndChargeValidator(
+        trusted_ca_certs_pem=[], emaid_map=InMemoryEmaidDriverMap(), ocsp_checker=_build_ocsp_checker()
+    )
+    session_start_service = SessionStartService(
+        payment_method_store=InMemoryPaymentMethodStore(),
+        # No driver->wallet mapping table exists yet (see module docstring on
+        # persistence); identity mapping is a testing-mode simplification.
+        wallet_id_for_driver=lambda driver_id: driver_id,
+    )
+
+    # --- OCPI --------------------------------------------------------
+    location_repository = InMemoryLocationRepository()
+    partner_registry = InMemoryPartnerRegistry()
+    reconciliation_store = InMemoryReconciliationResultStore()
+    # Constructed but not yet wired to live event-bus consumption — see
+    # module docstring's "what app_mode doesn't control" for location_sync/
+    # session_sync's own separate pending-wiring note.
+    partner_push_client = _build_partner_push_client()
+    session_push_client = _build_session_push_client()
+
+    # --- OCPP gateway (Redis/NATS are real in both modes) -----------------
+    presence_registry: PresenceRegistry = RedisPresenceRegistry(redis_client)
+    rate_limiter: RateLimiter = RedisRateLimiter(redis_client)
+    event_bus = NatsEventBus(settings.nats_url)
+    credential_verifier = InMemoryCredentialVerifier()
+    if settings.app_mode == "testing":
+        # A charge point with no seeded credential can never pass the WS
+        # handshake — this is the one demo charger a local smoke test /
+        # `ws_smoke_test.py` connects as. Production has no seed at all;
+        # provisioning real per-charger credentials is part of the same
+        # "no persistence layer yet" gap the module docstring calls out.
+        credential_verifier.set_credential("demo-charger-1", "demo-secret")
+    charger_registry = InMemoryChargerRegistry()
+    transaction_repository = InMemoryTransactionRepository()
+    connector_store = InMemoryConnectorStore()
+    meter_value_buffer = MeterValueBuffer(sink=InMemoryMeterValueSink())
+    local_id_tag_store = InMemoryLocalIdTagStore()
+    if settings.app_mode == "testing":
+        # Same demo-seed rationale as the credential above — nothing else
+        # ever authorizes an id_tag without this.
+        local_id_tag_store.set_status("TAG-123", AuthStatus.ACCEPTED)
+    authorizer = Authorizer(local_id_tag_store, InMemoryRoamingTokenChecker())
+    event_publisher = BusEventPublisher(event_bus)
+
+    connection_manager = ConnectionManager(
+        presence=presence_registry,
+        credentials=credential_verifier,
+        transactions=transaction_repository,
+        charger_registry=charger_registry,
+        events=event_publisher,
+        node_id=f"ocpp-gw-{uuid.uuid4().hex[:8]}",
+        default_heartbeat_interval_seconds=settings.heartbeat_default_interval_seconds,
+    )
+    message_handlers = OcppMessageHandlers(
+        charger_registry=charger_registry,
+        connector_store=connector_store,
+        authorizer=authorizer,
+        transaction_repository=transaction_repository,
+        meter_value_buffer=meter_value_buffer,
+        events=event_publisher,
+    )
+
+    return Services(
+        tariff_service=tariff_service,
+        wallet_service=wallet_service,
+        carbon_service=carbon_service,
+        cost_report_service=cost_report_service,
+        session_start_service=session_start_service,
+        plug_and_charge_validator=plug_and_charge_validator,
+        autocharge_mac_store=autocharge_mac_store,
+        location_repository=location_repository,
+        partner_registry=partner_registry,
+        reconciliation_store=reconciliation_store,
+        partner_push_client=partner_push_client,
+        session_push_client=session_push_client,
+        presence_registry=presence_registry,
+        rate_limiter=rate_limiter,
+        event_bus=event_bus,
+        connection_manager=connection_manager,
+        message_handlers=message_handlers,
+        credential_verifier=credential_verifier,
+        redis_client=redis_client,
+    )
+
+
+async def startup_services(services: Services) -> None:
+    """`NatsEventBus.connect()` provisions the JetStream stream and must run
+    before the first publish — call from each app's FastAPI lifespan."""
+    await services.event_bus.connect()
+
+
+async def shutdown_services(services: Services) -> None:
+    await services.event_bus.close()
+    await services.redis_client.aclose()

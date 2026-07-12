@@ -29,8 +29,8 @@ logger = logging.getLogger("evagg.tenancy")
 TENANT_HEADER = "x-tenant-id"
 
 # Paths that must be reachable without a resolved tenant (health checks,
-# generated API docs). Everything else fails closed.
-EXEMPT_PATHS: frozenset[str] = frozenset({"/healthz", "/docs", "/openapi.json", "/redoc"})
+# metrics scraping, generated API docs). Everything else fails closed.
+EXEMPT_PATHS: frozenset[str] = frozenset({"/healthz", "/metrics", "/docs", "/openapi.json", "/redoc"})
 
 current_tenant_id: ContextVar[uuid.UUID | None] = ContextVar("current_tenant_id", default=None)
 

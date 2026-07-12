@@ -20,10 +20,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, Protocol
 
+import httpx
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.hashes import SHA1
+from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import NameOID
+from cryptography.x509.ocsp import OCSPResponseStatus, load_der_ocsp_response
+from cryptography.x509.ocsp import OCSPCertStatus, OCSPRequestBuilder
 
 
 class PlugAndChargeError(Exception):
@@ -46,22 +51,80 @@ class InMemoryEmaidDriverMap:
 
 
 class OcspChecker(Protocol):
-    """Stands in for a real OCSP responder call. A revoked contract
-    certificate is otherwise indistinguishable from a valid one — signature
-    and validity-period checks alone would accept it."""
+    """A revoked contract certificate is otherwise indistinguishable from a
+    valid one — signature and validity-period checks alone would accept it.
+    Takes the issuer too (not just a serial number) because a real OCSP
+    request is keyed on issuer-name-hash + issuer-key-hash + serial, per
+    RFC 6960 — a serial number alone isn't enough to build one."""
 
-    async def is_revoked(self, serial_number: int) -> bool: ...
+    async def is_revoked(self, cert: x509.Certificate, issuer: x509.Certificate) -> bool: ...
 
 
 class InMemoryOcspChecker:
+    """The `app_mode=testing` default — every cert is presumed good unless
+    explicitly marked revoked by serial number."""
+
     def __init__(self) -> None:
         self._revoked: set[int] = set()
 
     def revoke(self, serial_number: int) -> None:
         self._revoked.add(serial_number)
 
-    async def is_revoked(self, serial_number: int) -> bool:
-        return serial_number in self._revoked
+    async def is_revoked(self, cert: x509.Certificate, issuer: x509.Certificate) -> bool:
+        return cert.serial_number in self._revoked
+
+
+class OcspError(Exception):
+    pass
+
+
+class HttpOcspChecker:
+    """Real RFC 6960 OCSP client — the `app_mode=production` implementation,
+    pending a live OEM/CA responder URL to point at (no such responder is
+    wired up or integration-tested against yet; see `settings.ocsp_responder_url`).
+
+    Fails closed: any transport error, non-200 response, or unparseable/
+    unsuccessful OCSP response is treated as "cannot confirm this cert is
+    good" and raises rather than silently treating the cert as valid.
+    """
+
+    def __init__(
+        self,
+        responder_url: str,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._responder_url = responder_url
+        self._http_client = http_client
+
+    async def is_revoked(self, cert: x509.Certificate, issuer: x509.Certificate) -> bool:
+        request = (
+            OCSPRequestBuilder()
+            .add_cert(cert, issuer, SHA1())
+            .build()
+        )
+        client = self._http_client or httpx.AsyncClient()
+
+        try:
+            response = await client.post(
+                self._responder_url,
+                content=request.public_bytes(Encoding.DER),
+                headers={"Content-Type": "application/ocsp-request"},
+            )
+        except httpx.HTTPError as exc:
+            raise OcspError(f"OCSP responder unreachable: {exc}") from exc
+
+        if response.status_code != 200:
+            raise OcspError(f"OCSP responder returned status {response.status_code}")
+
+        try:
+            ocsp_response = load_der_ocsp_response(response.content)
+        except ValueError as exc:
+            raise OcspError("malformed OCSP response") from exc
+
+        if ocsp_response.response_status != OCSPResponseStatus.SUCCESSFUL:
+            raise OcspError(f"OCSP responder did not return a successful status: {ocsp_response.response_status}")
+
+        return ocsp_response.certificate_status != OCSPCertStatus.GOOD
 
 
 def _signed_by(cert: x509.Certificate, ca_cert: x509.Certificate) -> bool:
@@ -109,14 +172,15 @@ class PlugAndChargeValidator:
         except ValueError as exc:
             raise PlugAndChargeError("malformed certificate") from exc
 
-        if not any(_signed_by(cert, ca) for ca in self._trusted_cas):
+        issuer_ca = next((ca for ca in self._trusted_cas if _signed_by(cert, ca)), None)
+        if issuer_ca is None:
             raise PlugAndChargeError("certificate not signed by any trusted CA")
 
         now = self._clock()
         if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
             raise PlugAndChargeError("certificate is not within its validity period")
 
-        if self._ocsp_checker is not None and await self._ocsp_checker.is_revoked(cert.serial_number):
+        if self._ocsp_checker is not None and await self._ocsp_checker.is_revoked(cert, issuer_ca):
             raise PlugAndChargeError("certificate has been revoked")
 
         emaid = _extract_emaid(cert)

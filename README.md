@@ -15,23 +15,40 @@ mobile/     Flutter driver app
 docs/       Engineering standards, architecture notes
 ```
 
-## Backend quickstart
+## Run the whole stack
+
+```bash
+docker compose up --build
+```
+
+Brings up Postgres+TimescaleDB, Redis, NATS, runs migrations, then starts
+both backend apps and the portal — `backend-main` (tenant-scoped services:
+tariffs, wallet, carbon, cost reports, charging-session start) on `:8000`,
+`backend-edge` (OCPI + the OCPP WebSocket) on `:8090`, portal on `:4200`.
+Everything runs in `EVAGG_APP_MODE=testing` by default: every external
+integration (Stripe, Electricity Maps, OCSP, OCPI partner push) is an
+in-process mock, so nothing needs a third-party account to click around.
+Set `EVAGG_APP_MODE=production` to swap in the real adapters — see
+`docs/production_readiness.md` for exactly what that still needs.
+
+## Backend quickstart (without Docker)
 
 ```bash
 cd backend
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# start Postgres/TimescaleDB, Redis, NATS
-cd .. && docker compose up -d
-
-cd backend
+# Postgres, Redis, NATS installed locally (apt/brew) rather than Docker —
+# TimescaleDB's own extension is optional: migrations detect its absence
+# and fall back to a plain table/view automatically.
 cp .env.example .env
 alembic upgrade head
 python -m evagg.scripts.audit_rls   # verifies every tenant table has an RLS policy
 pytest tests/unit --cov=src/evagg
-pytest tests/integration            # requires the docker-compose services above
-uvicorn evagg.main:app --reload
+pytest tests/integration            # skips whatever real service isn't reachable
+
+uvicorn evagg.main:app --reload --port 8000       # tenant-scoped services
+uvicorn evagg.edge_app:app --reload --port 8090   # OCPI + OCPP WebSocket
 ```
 
 ## Portal quickstart
@@ -124,16 +141,24 @@ is now closed:
   design-system reference (`--accent`/`--track` meter fill, status-warning
   banner styling), not ad hoc colors.
 
-## Known gaps (not yet addressed)
+## Testing vs. production mode
 
-- **PSP**: no real Stripe account behind `StripePaymentProvider`, and no
-  webhook handler for async charge confirmation.
-- **Plug & Charge OCSP**: still an injectable in-memory fake, no live OCSP
-  responder integration.
-- **No true end-to-end system test**: DB/RLS, Redis, and NATS adapters are
-  each verified against real services individually, but the app has never
-  been run live against all of them at once and driven over real HTTP.
-- **No observability, secrets manager, or deployment infra** (out of scope
-  for this phase).
+Every previous stage built well-tested services and routers but never
+assembled them into a single running app — `evagg.main`/`evagg.gateway.app`
+mounted no business routes at all, and the OCPP WebSocket transport didn't
+exist. That's now done: `evagg.composition` wires everything into
+`evagg.main:app` and `evagg.edge_app:app`, real health checks
+(Postgres/Redis/NATS)/structured logging/Prometheus metrics were added, and
+Stripe/Electricity Maps/OCSP/OCPI now each have both a real HTTP adapter and
+an in-process mock, selected by `EVAGG_APP_MODE`.
 
-See PR #1 and the commit history for the full narrative.
+**`docs/production_readiness.md` is now the authoritative gap list** —
+it replaces the old inline "Known gaps" section here, and covers a bigger
+surface than payments/OCSP alone: most notably, every domain store
+(tariffs, wallet, cost rollups, OCPI locations/partners, OCPP chargers/
+transactions) is still in-memory only — Task 6.1 built the Postgres schema,
+but no task ever built a repository against it. That's the single largest
+remaining item before a real launch, bigger than any one external
+integration.
+
+See PR #1, `CHANGELOG.md`, and the commit history for the full narrative.

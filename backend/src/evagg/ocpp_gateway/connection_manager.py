@@ -105,6 +105,17 @@ class ConnectionManager:
         ttl = (heartbeat_interval_seconds or self._default_heartbeat_interval_seconds) * 2
         await self._presence.refresh(charger_id, ttl_seconds=ttl)
 
+    async def handle_disconnect(self, charger_id: str) -> None:
+        """A clean WebSocket close (as opposed to `check_and_expire_heartbeats`
+        sweeping a silently-vanished connection) — marks offline and
+        publishes the disconnect event immediately rather than waiting for
+        the next heartbeat-expiry sweep."""
+        state = await self._presence.get(charger_id)
+        if state is None or state.status != "online":
+            return
+        await self._presence.mark_offline(charger_id)
+        await self._events.publish_disconnected(tenant_id=uuid.UUID(state.tenant_id), charger_id=charger_id)
+
     async def check_and_expire_heartbeats(
         self, charger_ids: list[str], heartbeat_interval_seconds: int, now: float | None = None
     ) -> list[str]:

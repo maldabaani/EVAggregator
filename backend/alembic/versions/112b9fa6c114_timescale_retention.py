@@ -35,8 +35,20 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _timescaledb_active(bind) -> bool:
+    """Retention policies are a hypertable-only feature — skip on machines
+    where 8679657fe757 fell back to plain tables/view because the
+    TimescaleDB extension isn't installed (see that migration's
+    `_timescaledb_available` for why — this sandbox included)."""
+    return bind.execute(
+        text("SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'")
+    ).first() is not None
+
+
 def upgrade() -> None:
     bind = op.get_bind()
+    if not _timescaledb_active(bind):
+        return
 
     # Retention: drop raw rows past 90 days (the continuous aggregate from
     # 8679657fe757 is untouched by this policy since it targets the
@@ -47,5 +59,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    if not _timescaledb_active(bind):
+        return
     bind.execute(text("SELECT remove_retention_policy('status_log', if_exists => TRUE)"))
     bind.execute(text("SELECT remove_retention_policy('meter_value', if_exists => TRUE)"))

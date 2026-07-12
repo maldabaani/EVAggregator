@@ -7,6 +7,16 @@ follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `EVAGG_PERSISTENCE_BACKEND` (`memory` / `supabase`) — real PostgREST-backed
+  repositories (`evagg.persistence`) for the OCPP core (chargers, connectors,
+  transactions, credentials, meter values) and billing (tariffs, wallet
+  ledger) against a Supabase project, alongside the existing in-memory
+  stores. `docs/supabase/schema.sql` sets up the schema. Unit-tested against
+  an in-memory PostgREST simulator — not verified against a live Supabase
+  project (this session's sandbox blocks all of `*.supabase.co`).
+- `charger.charge_point_id` column + migration `406b95a84228` — the OCPP
+  charge-point identity string every handler uses had no column; only the
+  internal UUID primary key existed.
 - `EVAGG_APP_MODE` (`testing` / `production`) — the whole app now runs with
   in-process mocks for every external integration (Stripe, Electricity
   Maps, OCSP, OCPI partner push) in `testing` mode, no third-party accounts

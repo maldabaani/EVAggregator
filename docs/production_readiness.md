@@ -16,26 +16,55 @@ The app runs in one of two modes, set via `EVAGG_APP_MODE`:
   today" means.
 - **`production`**: swaps those same four integrations for their real HTTP
   adapters, and `evagg.composition.validate_production_config()` raises at
-  startup if any of their settings are still a dev-only placeholder. It does
-  **not** upgrade anything else — see the persistence item below, which nothing
-  currently switches on `app_mode` at all.
+  startup if any of their settings are still a dev-only placeholder.
 
-## 1. Persistence — the single largest gap
+Persistence is a separate, second axis: `EVAGG_PERSISTENCE_BACKEND`
+(`memory` default / `supabase`) — see item 1.
 
-Every domain store in this codebase (tariffs, wallet ledger, cost-report
-rollups, OCPI locations/partners, OCPP chargers/transactions/connectors/
-credentials/meter-values) has **only an in-memory implementation**. Task 6.1
-built the Postgres schema; no task ever built a repository against it. This
-is true in both `app_mode`s today — state lives in the running process and is
-lost on restart or on any second instance (no horizontal scaling, no shared
-state between `backend-main`/`backend-edge`).
+## 1. Persistence — largely closed for the OCPP core + billing, open elsewhere
 
-Building real SQLAlchemy-backed repositories for each of these, satisfying
-the same `Protocol` each in-memory store already implements, is the biggest
-remaining piece of work — bigger than all four external integrations
-combined. The seam to do it is already there (every service takes its store
-as a constructor argument); it just needs real implementations wired in
-`evagg.composition.build_services()`.
+`EVAGG_PERSISTENCE_BACKEND` (`memory` default / `supabase`) is now a second,
+independent axis alongside `EVAGG_APP_MODE`. `supabase` backs these stores
+with real PostgREST calls against a Supabase project instead of an
+in-process dict (`evagg.persistence`):
+
+- OCPP core: `ChargerRegistry`, `ConnectorStore`, `TransactionRepository`,
+  `CredentialVerifier`, `MeterValueSink` (`evagg.persistence.supabase_ocpp`).
+- Billing: `TariffStore`, `WalletLedgerStore`
+  (`evagg.persistence.supabase_billing`).
+
+**Not verified against a real Supabase project** — this session's sandbox
+blocks all of `*.supabase.co` on every port (confirmed for both `:5432` and
+`:443`), so every one of these is unit-tested against an in-memory PostgREST
+simulator (`tests/unit/persistence/fake_postgrest.py`) instead of a live
+call. `docs/supabase/schema.sql` (the schema these repositories expect) IS
+verified — it creates all 24 tables cleanly against a real local Postgres —
+but the `anon`-role grants at the bottom can only be checked by inspection,
+since `anon` doesn't exist outside a Supabase project.
+
+Building this surfaced a real schema gap, now fixed: `charger` had no column
+for the OCPP charge-point identity string every handler uses (WS path
+segment / Basic Auth username) — only the internal UUID primary key. Added
+as `charger.charge_point_id` (migration `406b95a84228`).
+
+Tenant isolation for the Supabase backend is enforced at the **application**
+layer (every repository call includes an explicit `tenant_id=eq.<id>`
+filter), not via Postgres RLS — PostgREST authenticates as the `anon` role
+per the publishable API key, which doesn't carry the session-level
+`app.current_tenant` GUC the SQLAlchemy path's RLS policies key off. Real
+defense-in-depth here would need per-user JWTs (Supabase Auth) and RLS
+policies keyed on JWT claims instead — not built.
+
+**Still only in-memory, either backend:** cost-report rollups, OCPI
+locations/partners/reconciliation. Building real repositories for these —
+Supabase-backed or SQLAlchemy — is the next-biggest remaining item. The seam
+is already there (every service takes its store as a constructor argument);
+it just needs an implementation wired in `evagg.composition.build_services()`.
+
+A SQLAlchemy-backed path (real Postgres via `asyncpg`, not PostgREST) was
+never built either — `persistence_backend` only has `memory`/`supabase`
+today. That would be the natural third option for a deployment that runs
+its own Postgres rather than using Supabase.
 
 ## 2. External integrations — real adapters exist, pending real credentials
 
@@ -104,6 +133,10 @@ here, despite the marketing page responding 200). Docker-based environments
 the real hypertable path. This is not a difference between `app_mode`s —
 it's a difference between "does this Postgres have the extension," checked
 at migration time, independent of testing vs. production.
+
+Supabase doesn't offer the `timescaledb` extension at all, so
+`docs/supabase/schema.sql` bakes in the same plain-table/plain-view fallback
+permanently for that path, rather than detecting it at runtime.
 
 ## 7. Other hygiene
 

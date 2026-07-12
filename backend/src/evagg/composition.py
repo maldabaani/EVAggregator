@@ -16,18 +16,24 @@ swaps in the real adapters and calls `validate_production_config()` at
 startup, which raises if any of their settings are still holding a
 dev-only placeholder — it never silently falls back to a mock.
 
-It does **not** control persistence. Every domain store in this codebase
-(tariffs, wallet ledger, cost-report rollups, OCPI locations/partners, OCPP
-chargers/transactions/connectors/credentials/meter-values) only has an
-in-memory implementation — Task 6.1 built the Postgres schema, but no task
-ever built a repository against it. That's true in both modes today: state
-lives in the process and is lost on restart. Building real Postgres-backed
-repositories for these is the single largest remaining production-readiness
-item — see `docs/production_readiness.md`.
+`app_mode` does **not** control persistence — `persistence_backend` does,
+a separate axis. `persistence_backend=memory` (the default): every domain
+store (tariffs, wallet ledger, OCPI locations/partners, OCPP chargers/
+transactions/connectors/credentials/meter-values) is in-process and lost on
+restart — true in both `app_mode`s, and still what cost-report rollups and
+OCPI locations/partners use regardless of this setting (see below).
+`persistence_backend=supabase`: tariffs, wallet, and the OCPP core
+(chargers/connectors/transactions/credentials/meter-values) are backed by
+real PostgREST calls against a Supabase project instead
+(`evagg.persistence`) — see `docs/supabase/schema.sql` for the schema those
+calls expect. OCPI locations/partners and cost-report rollups have no
+Supabase-backed repository yet either way; that remains the largest
+production-readiness gap — see `docs/production_readiness.md`.
 
 Redis and NATS are real in both modes (they're free/local infra, not
 third-party accounts), so presence, rate limiting, the carbon cache, and the
-OCPP event bus all use their real backing service here.
+OCPP event bus all use their real backing service here regardless of
+`persistence_backend`.
 """
 
 from __future__ import annotations
@@ -65,15 +71,24 @@ from evagg.ocpi.partner_store import InMemoryPartnerRegistry
 from evagg.ocpi.session_sync import HttpSessionPushClient, InMemorySessionPushClient, SessionPushClient
 from evagg.ocpp_gateway.authorize import AuthStatus, Authorizer, InMemoryLocalIdTagStore, InMemoryRoamingTokenChecker
 from evagg.ocpp_gateway.connection_manager import ConnectionManager
-from evagg.ocpp_gateway.connectors import InMemoryConnectorStore
-from evagg.ocpp_gateway.credentials import InMemoryCredentialVerifier
+from evagg.ocpp_gateway.connectors import ConnectorStore, InMemoryConnectorStore
+from evagg.ocpp_gateway.credentials import CredentialVerifier, InMemoryCredentialVerifier
 from evagg.ocpp_gateway.event_bus import NatsEventBus
 from evagg.ocpp_gateway.bus_event_publisher import BusEventPublisher
 from evagg.ocpp_gateway.message_handlers import OcppMessageHandlers
-from evagg.ocpp_gateway.meter_values import InMemoryMeterValueSink, MeterValueBuffer
+from evagg.ocpp_gateway.meter_values import InMemoryMeterValueSink, MeterValueBuffer, MeterValueSink
 from evagg.ocpp_gateway.presence import PresenceRegistry, RedisPresenceRegistry
-from evagg.ocpp_gateway.registration import InMemoryChargerRegistry
-from evagg.ocpp_gateway.transactions import InMemoryTransactionRepository
+from evagg.ocpp_gateway.registration import ChargerRegistry, InMemoryChargerRegistry
+from evagg.ocpp_gateway.transactions import InMemoryTransactionRepository, TransactionRepository
+from evagg.persistence.supabase_billing import SupabaseTariffStore, SupabaseWalletLedgerStore
+from evagg.persistence.supabase_client import SupabaseRestClient
+from evagg.persistence.supabase_ocpp import (
+    SupabaseChargerRegistry,
+    SupabaseConnectorStore,
+    SupabaseCredentialVerifier,
+    SupabaseMeterValueSink,
+    SupabaseTransactionRepository,
+)
 
 
 class ProductionConfigError(Exception):
@@ -139,7 +154,7 @@ class Services:
     event_bus: NatsEventBus
     connection_manager: ConnectionManager
     message_handlers: OcppMessageHandlers
-    credential_verifier: InMemoryCredentialVerifier
+    credential_verifier: CredentialVerifier
 
     redis_client: redis_asyncio.Redis
 
@@ -176,6 +191,10 @@ def _build_session_push_client() -> SessionPushClient:
     return InMemorySessionPushClient()
 
 
+def _build_supabase_client() -> SupabaseRestClient:
+    return SupabaseRestClient(settings.supabase_url, settings.supabase_api_key)
+
+
 def build_services() -> Services:
     if settings.app_mode == "production":
         validate_production_config()
@@ -183,8 +202,13 @@ def build_services() -> Services:
     redis_client = redis_asyncio.from_url(settings.redis_url)
 
     # --- Billing -----------------------------------------------------
-    tariff_service = TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider())
-    wallet_service = WalletService(InMemoryWalletLedgerStore(), _build_payment_provider())
+    supabase_client = _build_supabase_client() if settings.persistence_backend == "supabase" else None
+    if supabase_client is not None:
+        tariff_service = TariffService(SupabaseTariffStore(supabase_client), InMemoryTenantCurrencyProvider())
+        wallet_service = WalletService(SupabaseWalletLedgerStore(supabase_client), _build_payment_provider())
+    else:
+        tariff_service = TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider())
+        wallet_service = WalletService(InMemoryWalletLedgerStore(), _build_payment_provider())
 
     # --- Carbon --------------------------------------------------------
     zone_map = InMemoryCarbonZoneMap()
@@ -224,18 +248,39 @@ def build_services() -> Services:
     presence_registry: PresenceRegistry = RedisPresenceRegistry(redis_client)
     rate_limiter: RateLimiter = RedisRateLimiter(redis_client)
     event_bus = NatsEventBus(settings.nats_url)
-    credential_verifier = InMemoryCredentialVerifier()
-    if settings.app_mode == "testing":
-        # A charge point with no seeded credential can never pass the WS
-        # handshake — this is the one demo charger a local smoke test /
-        # `ws_smoke_test.py` connects as. Production has no seed at all;
-        # provisioning real per-charger credentials is part of the same
-        # "no persistence layer yet" gap the module docstring calls out.
-        credential_verifier.set_credential("demo-charger-1", "demo-secret")
-    charger_registry = InMemoryChargerRegistry()
-    transaction_repository = InMemoryTransactionRepository()
-    connector_store = InMemoryConnectorStore()
-    meter_value_buffer = MeterValueBuffer(sink=InMemoryMeterValueSink())
+
+    credential_verifier: CredentialVerifier
+    charger_registry: ChargerRegistry
+    transaction_repository: TransactionRepository
+    connector_store: ConnectorStore
+    meter_value_sink: MeterValueSink
+
+    if supabase_client is not None:
+        credential_verifier = SupabaseCredentialVerifier(supabase_client)
+        charger_registry = SupabaseChargerRegistry(supabase_client)
+        transaction_repository = SupabaseTransactionRepository(supabase_client)
+        connector_store = SupabaseConnectorStore(supabase_client)
+        meter_value_sink = SupabaseMeterValueSink(supabase_client)
+        # Demo credential/id-tag seeding (below) needs a synchronous call —
+        # SupabaseCredentialVerifier.set_credential is an HTTP request, so it
+        # can't run here. Seed a demo charger's row + ws_credential_hash via
+        # the SQL Editor or a one-off REST call if you want the same
+        # end-to-end demo this session ran against local Postgres.
+    else:
+        in_memory_credential_verifier = InMemoryCredentialVerifier()
+        if settings.app_mode == "testing":
+            # A charge point with no seeded credential can never pass the WS
+            # handshake — this is the one demo charger a local smoke test /
+            # `ws_smoke_test.py` connects as. Production has no seed at all;
+            # provisioning real per-charger credentials is part of the same
+            # "no persistence layer yet" gap the module docstring calls out.
+            in_memory_credential_verifier.set_credential("demo-charger-1", "demo-secret")
+        credential_verifier = in_memory_credential_verifier
+        charger_registry = InMemoryChargerRegistry()
+        transaction_repository = InMemoryTransactionRepository()
+        connector_store = InMemoryConnectorStore()
+        meter_value_sink = InMemoryMeterValueSink()
+    meter_value_buffer = MeterValueBuffer(sink=meter_value_sink)
     local_id_tag_store = InMemoryLocalIdTagStore()
     if settings.app_mode == "testing":
         # Same demo-seed rationale as the credential above — nothing else

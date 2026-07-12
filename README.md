@@ -153,12 +153,16 @@ Stripe/Electricity Maps/OCSP/OCPI now each have both a real HTTP adapter and
 an in-process mock, selected by `EVAGG_APP_MODE`.
 
 **`docs/production_readiness.md` is now the authoritative gap list** —
-it replaces the old inline "Known gaps" section here, and covers a bigger
-surface than payments/OCSP alone: most notably, every domain store
-(tariffs, wallet, cost rollups, OCPI locations/partners, OCPP chargers/
-transactions) is still in-memory only — Task 6.1 built the Postgres schema,
-but no task ever built a repository against it. That's the single largest
-remaining item before a real launch, bigger than any one external
-integration.
+it replaces the old inline "Known gaps" section here.
+
+Persistence is a second, independent axis, `EVAGG_PERSISTENCE_BACKEND`:
+`memory` (default) keeps every domain store in-process; `supabase` backs
+the OCPP core (chargers/connectors/transactions/credentials/meter-values)
+and billing (tariffs/wallet) with real PostgREST calls against a Supabase
+project instead — see `docs/supabase/schema.sql` (paste into the Supabase
+SQL Editor once to set up the schema) and set `EVAGG_SUPABASE_URL`/
+`EVAGG_SUPABASE_API_KEY`. Cost rollups and OCPI locations/partners are
+still in-memory either way — the largest remaining item before a real
+launch, bigger than any one external integration.
 
 See PR #1, `CHANGELOG.md`, and the commit history for the full narrative.

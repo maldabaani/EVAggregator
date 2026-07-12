@@ -15,6 +15,13 @@ from evagg.models.base import Base, TenantScopedMixin
 class Charger(Base, TenantScopedMixin):
     __tablename__ = "charger"
 
+    # The OCPP charge-point identity (the WebSocket path segment / Basic
+    # Auth username a real charger connects as) — distinct from `id`, the
+    # internal UUID primary key everything else FKs against. Every OCPP
+    # message handler and the WS transport (evagg.ocpp_gateway.ws_app)
+    # identifies a charger by this string; a repository resolves it to `id`
+    # once, on the way in.
+    charge_point_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     vendor: Mapped[str | None] = mapped_column(String(100), nullable=True)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     firmware_version: Mapped[str | None] = mapped_column(String(50), nullable=True)

@@ -84,5 +84,19 @@ class Settings(BaseSettings):
     ocpi_partner_push_base_url: str = "https://partner.example.com/ocpi"
     ocpi_partner_push_token: str = "dev_only_replace_me"
 
+    # `memory`: every domain store (tariffs, wallet, OCPP chargers/
+    # transactions/connectors/credentials/meter-values) is in-process and
+    # lost on restart — the default, and the only thing most of this app has
+    # ever run against. `supabase`: those same stores are backed by
+    # PostgREST calls against a Supabase project (evagg.persistence) instead
+    # of SQLAlchemy — see docs/supabase/schema.sql for the schema those
+    # calls expect, and its header for why this couldn't be verified against
+    # a real project from this session. Orthogonal to `app_mode`: this picks
+    # where domain data lives, `app_mode` picks how external integrations
+    # (Stripe, carbon, OCSP, OCPI push) are wired.
+    persistence_backend: Literal["memory", "supabase"] = "memory"
+    supabase_url: str = "https://project.supabase.co"
+    supabase_api_key: str = "dev_only_replace_me"
+
 
 settings = Settings()

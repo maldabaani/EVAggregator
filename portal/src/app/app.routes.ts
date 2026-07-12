@@ -22,4 +22,9 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/cost-dashboard/cost-dashboard.component').then((m) => m.CostDashboardComponent),
   },
+  {
+    path: 'commands',
+    loadComponent: () =>
+      import('./features/commands/command-panel/command-panel.component').then((m) => m.CommandPanelComponent),
+  },
 ];

@@ -1,0 +1,132 @@
+<div class="command-panel">
+  <header class="page-header">
+    <h1>Charger commands</h1>
+    <p class="page-header__subtitle">
+      Send a remote command to a charge point and watch it get accepted, rejected, or time out.
+    </p>
+  </header>
+
+  <section class="filter-card" [formGroup]="form">
+    <div class="filter-card__field">
+      <label for="charger-id-input">Charger ID</label>
+      <input
+        id="charger-id-input"
+        type="text"
+        formControlName="chargerId"
+        placeholder="e.g. CP-001"
+        data-testid="charger-id-input"
+      />
+    </div>
+
+    <div class="filter-card__field">
+      <label for="tenant-id-input">Tenant ID</label>
+      <input
+        id="tenant-id-input"
+        type="text"
+        formControlName="tenantId"
+        placeholder="Paste a tenant ID"
+        data-testid="tenant-id-input"
+      />
+    </div>
+
+    <div class="filter-card__field">
+      <label for="command-type-select">Command</label>
+      <select
+        id="command-type-select"
+        formControlName="commandType"
+        (change)="onCommandTypeChange()"
+        data-testid="command-type-select"
+      >
+        <option *ngFor="let type of commandTypes" [value]="type">{{ type }}</option>
+      </select>
+    </div>
+
+    <div class="filter-card__field filter-card__field--wide">
+      <label for="payload-input">Payload (JSON)</label>
+      <textarea
+        id="payload-input"
+        formControlName="payload"
+        rows="3"
+        spellcheck="false"
+        data-testid="payload-input"
+      ></textarea>
+    </div>
+
+    <button
+      type="button"
+      class="button button--primary"
+      (click)="send()"
+      [disabled]="sending"
+      data-testid="send-command-button"
+    >
+      {{ sending ? 'Sending…' : 'Send command' }}
+    </button>
+  </section>
+
+  <div *ngIf="sendError" class="banner banner--error" data-testid="send-error">
+    <span class="banner__icon" aria-hidden="true">&#9888;</span>
+    <span>{{ sendError }}</span>
+  </div>
+
+  <section *ngIf="lastResult" class="result-card" data-testid="last-result">
+    <div class="result-card__header">
+      <h2>Last command</h2>
+      <span class="status-pill" [class]="'status-pill--' + lastResult.status" data-testid="last-result-status">
+        {{ lastResult.status }}
+      </span>
+    </div>
+    <dl class="result-card__meta">
+      <dt>Command ID</dt>
+      <dd data-testid="last-result-id">{{ lastResult.commandId }}</dd>
+    </dl>
+    <pre class="result-card__json" data-testid="last-result-json">{{ resultJson(lastResult.result) }}</pre>
+  </section>
+
+  <section class="log-card">
+    <div class="log-card__header">
+      <h2>Recent commands</h2>
+      <button
+        type="button"
+        class="button button--secondary"
+        (click)="loadLog()"
+        [disabled]="logLoading || !form.value.chargerId"
+        data-testid="refresh-log-button"
+      >
+        {{ logLoading ? 'Loading…' : 'Refresh' }}
+      </button>
+    </div>
+
+    <div *ngIf="logError" class="state-panel state-panel--error" data-testid="log-error-state">
+      <p>{{ logError }}</p>
+    </div>
+
+    <div
+      *ngIf="!logError && logLoaded && log.length === 0"
+      class="state-panel"
+      data-testid="log-empty-state"
+    >
+      <p>No commands sent to this charger yet.</p>
+    </div>
+
+    <table *ngIf="log.length > 0" class="log-table" data-testid="log-table">
+      <thead>
+        <tr>
+          <th scope="col">Type</th>
+          <th scope="col">Status</th>
+          <th scope="col">Requested</th>
+          <th scope="col">Responded</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let record of log" data-testid="log-row">
+          <td>{{ record.type }}</td>
+          <td>
+            <span class="status-pill" [class]="'status-pill--' + record.status">{{ record.status }}</span>
+          </td>
+          <td>{{ record.requestedAt | date: 'short' }}</td>
+          <td>{{ record.respondedAt ? (record.respondedAt | date: 'short') : '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>

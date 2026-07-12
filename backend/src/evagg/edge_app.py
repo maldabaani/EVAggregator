@@ -52,8 +52,18 @@ async def _tariff_catalog():
     return services.tariff_catalog
 
 
-app.include_router(build_ocpi_router(_partner_registry, _location_repository, _tariff_catalog))
-app.include_router(build_admin_router(_partner_registry, _reconciliation_store))
+async def _charging_profile_service():
+    return services.charging_profile_service
+
+
+async def _session_charger_map():
+    return services.session_charger_map
+
+
+app.include_router(
+    build_ocpi_router(_partner_registry, _location_repository, _tariff_catalog, _charging_profile_service)
+)
+app.include_router(build_admin_router(_partner_registry, _reconciliation_store, _session_charger_map))
 app.include_router(
     build_ocpp_ws_router(services.connection_manager, services.message_handlers, services.live_connections)
 )

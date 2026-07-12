@@ -65,6 +65,11 @@ from evagg.core.config import settings
 from evagg.fleet.cost_report import CostReportService
 from evagg.fleet.rollup import InMemoryRollupStore
 from evagg.gateway.rate_limit import RateLimiter, RedisRateLimiter
+from evagg.ocpi.charging_profiles import (
+    ChargingProfileService,
+    InMemoryActiveChargingProfileStore,
+    InMemorySessionChargerMap,
+)
 from evagg.ocpi.location_sync import HttpPartnerPushClient, InMemoryPartnerPushClient, PartnerPushClient
 from evagg.ocpi.locations import InMemoryLocationRepository
 from evagg.ocpi.partner_admin import InMemoryReconciliationResultStore
@@ -76,6 +81,7 @@ from evagg.ocpp_gateway.commands import (
     CommandLogStore,
     FirmwareUpdateStore,
     InMemoryCommandLogStore,
+    InMemoryConnectorCapacityProvider,
     InMemoryFirmwareUpdateStore,
     RemoteCommandService,
 )
@@ -153,6 +159,8 @@ class Services:
     location_repository: InMemoryLocationRepository
     partner_registry: InMemoryPartnerRegistry
     tariff_catalog: OcpiTariffCatalog
+    charging_profile_service: ChargingProfileService
+    session_charger_map: InMemorySessionChargerMap
     reconciliation_store: InMemoryReconciliationResultStore
     partner_push_client: PartnerPushClient
     session_push_client: SessionPushClient
@@ -323,6 +331,13 @@ def build_services() -> Services:
         transport=command_transport,
         firmware_store=firmware_update_store,
     )
+    session_charger_map = InMemorySessionChargerMap()
+    charging_profile_service = ChargingProfileService(
+        session_charger_map=session_charger_map,
+        active_profile_store=InMemoryActiveChargingProfileStore(),
+        command_service=remote_command_service,
+        capacity_provider=InMemoryConnectorCapacityProvider(),
+    )
 
     connection_manager = ConnectionManager(
         presence=presence_registry,
@@ -354,6 +369,8 @@ def build_services() -> Services:
         location_repository=location_repository,
         partner_registry=partner_registry,
         tariff_catalog=tariff_catalog,
+        charging_profile_service=charging_profile_service,
+        session_charger_map=session_charger_map,
         reconciliation_store=reconciliation_store,
         partner_push_client=partner_push_client,
         session_push_client=session_push_client,

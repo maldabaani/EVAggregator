@@ -9,13 +9,21 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Response
+from pydantic import BaseModel
 
+from evagg.ocpi.charging_profiles import InMemorySessionChargerMap, SessionChargerBinding
 from evagg.ocpi.partner_admin import (
     export_reconciliation_csv,
     filter_reconciliation_entries,
     rotate_token_a,
 )
 from evagg.ocpi.partner_store import Partner, PartnerRegistry
+
+
+class SessionBindingRequest(BaseModel):
+    charger_id: str
+    tenant_id: uuid.UUID
+    connector_id: int
 
 
 def _partner_to_dict(partner: Partner) -> dict:
@@ -29,7 +37,9 @@ def _partner_to_dict(partner: Partner) -> dict:
     }
 
 
-def build_admin_router(partner_registry_dependency, reconciliation_store_dependency) -> APIRouter:
+def build_admin_router(
+    partner_registry_dependency, reconciliation_store_dependency, session_charger_map_dependency
+) -> APIRouter:
     router = APIRouter(prefix="/admin/ocpi", tags=["ocpi-admin"])
 
     @router.get("/partners")
@@ -67,5 +77,23 @@ def build_admin_router(partner_registry_dependency, reconciliation_store_depende
         filtered = filter_reconciliation_entries(entries, status=status)
         csv_body = export_reconciliation_csv(filtered)
         return Response(content=csv_body, media_type="text/csv")
+
+    @router.post("/sessions/{session_id}/binding")
+    async def bind_session_to_charger(
+        session_id: str,
+        body: SessionBindingRequest,
+        session_charger_map: InMemorySessionChargerMap = Depends(session_charger_map_dependency),
+    ) -> dict:
+        """Records which charger/connector an OCPI session_id maps to, so the
+        ChargingProfiles module can resolve it. A stand-in for the live
+        `LocationSyncService`-style event consumer this doesn't have yet
+        (see `charging_profiles.py`'s module docstring) — start_transaction
+        already mints the transaction_id/session_id, but nothing today
+        pushes that mapping here automatically."""
+        session_charger_map.set_binding(
+            session_id,
+            SessionChargerBinding(charger_id=body.charger_id, tenant_id=body.tenant_id, connector_id=body.connector_id),
+        )
+        return {"session_id": session_id, "charger_id": body.charger_id, "connector_id": body.connector_id}
 
     return router

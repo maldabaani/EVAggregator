@@ -8,9 +8,13 @@ architecture Task 1.1 owns.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, FastAPI, Header
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+from evagg.ocpi.charging_profiles import ChargingProfilePeriod, ChargingProfileService
 from evagg.ocpi.errors import OcpiError, OcpiErrorCode
 from evagg.ocpi.locations import LocationRepository
 from evagg.ocpi.partner_store import PartnerRegistry
@@ -19,6 +23,36 @@ from evagg.ocpi.v211_shim.adapters import location_to_v211, tariff_to_v211
 from evagg.ocpi.v221.adapters import location_to_v221, tariff_to_v221
 from evagg.ocpi.v230.adapters import location_to_v230, tariff_to_v230
 from evagg.ocpi.versions import build_versions_response, negotiate_credentials
+
+
+class _ChargingProfilePeriodPayload(BaseModel):
+    start_period: int
+    limit: float
+
+
+class _ChargingProfilePayload(BaseModel):
+    charging_rate_unit: str
+    charging_profile_period: list[_ChargingProfilePeriodPayload]
+    start_date_time: datetime | None = None
+    min_charging_rate: float | None = None
+
+
+class SetChargingProfileRequest(BaseModel):
+    charging_profile: _ChargingProfilePayload
+    duration: int | None = None
+    response_url: str | None = None
+
+
+def _active_profile_dict(profile) -> dict | None:
+    if profile is None:
+        return None
+    return {
+        "charging_rate_unit": profile.charging_rate_unit,
+        "charging_profile_period": [{"start_period": p.start_period, "limit": p.limit} for p in profile.periods],
+        "duration": profile.duration,
+        "min_charging_rate": profile.min_charging_rate,
+        "start_date_time": profile.start_date_time.isoformat() if profile.start_date_time else None,
+    }
 
 
 def register_ocpi_exception_handlers(app: FastAPI) -> None:
@@ -31,6 +65,7 @@ def build_ocpi_router(
     partner_registry_dependency,
     location_repository_dependency,
     tariff_catalog_dependency,
+    charging_profile_service_dependency,
     base_url: str = "https://api.example.com/ocpi",
 ) -> APIRouter:
     router = APIRouter(prefix="/ocpi")
@@ -142,5 +177,56 @@ def build_ocpi_router(
         if tariff is None:
             raise OcpiError(OcpiErrorCode.UNKNOWN_TARIFF, f"unknown tariff: {tariff_id}")
         return tariff_to_v230(tariff).model_dump(mode="json")
+
+    # --- ChargingProfiles (2.2.1+ only — not part of the 2.1.1 module set) --
+
+    async def _put_charging_profile(
+        session_id: str, body: SetChargingProfileRequest, service: ChargingProfileService
+    ) -> dict:
+        periods = [
+            ChargingProfilePeriod(start_period=p.start_period, limit=p.limit)
+            for p in body.charging_profile.charging_profile_period
+        ]
+        result = await service.set_charging_profile(
+            session_id,
+            body.charging_profile.charging_rate_unit,
+            periods,
+            duration=body.duration,
+            min_charging_rate=body.charging_profile.min_charging_rate,
+            start_date_time=body.charging_profile.start_date_time,
+        )
+        return {"result": result.result.value, "reason": result.reason}
+
+    async def _get_charging_profile(session_id: str, service: ChargingProfileService) -> dict:
+        status, profile = await service.get_active_profile(session_id)
+        return {"result": status.value, "profile": _active_profile_dict(profile)}
+
+    @router.put("/2.2.1/chargingprofiles/{session_id}")
+    async def put_charging_profile_v221(
+        session_id: str,
+        body: SetChargingProfileRequest,
+        service: ChargingProfileService = Depends(charging_profile_service_dependency),
+    ) -> dict:
+        return await _put_charging_profile(session_id, body, service)
+
+    @router.get("/2.2.1/chargingprofiles/{session_id}")
+    async def get_charging_profile_v221(
+        session_id: str, service: ChargingProfileService = Depends(charging_profile_service_dependency)
+    ) -> dict:
+        return await _get_charging_profile(session_id, service)
+
+    @router.put("/2.3.0/chargingprofiles/{session_id}")
+    async def put_charging_profile_v230(
+        session_id: str,
+        body: SetChargingProfileRequest,
+        service: ChargingProfileService = Depends(charging_profile_service_dependency),
+    ) -> dict:
+        return await _put_charging_profile(session_id, body, service)
+
+    @router.get("/2.3.0/chargingprofiles/{session_id}")
+    async def get_charging_profile_v230(
+        session_id: str, service: ChargingProfileService = Depends(charging_profile_service_dependency)
+    ) -> dict:
+        return await _get_charging_profile(session_id, service)
 
     return router

@@ -6,21 +6,25 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from evagg.ocpi.admin_router import build_admin_router
+from evagg.ocpi.charging_profiles import InMemorySessionChargerMap
 from evagg.ocpi.partner_admin import InMemoryReconciliationResultStore, ReconciliationEntry
 from evagg.ocpi.partner_store import InMemoryPartnerRegistry, Partner
 
 TENANT_ID = uuid.uuid4()
 
 
-def _build_app(registry, reconciliation_store):
+def _build_app(registry, reconciliation_store, session_charger_map=None):
     async def get_registry():
         return registry
 
     async def get_reconciliation_store():
         return reconciliation_store
 
+    async def get_session_charger_map():
+        return session_charger_map or InMemorySessionChargerMap()
+
     app = FastAPI()
-    app.include_router(build_admin_router(get_registry, get_reconciliation_store))
+    app.include_router(build_admin_router(get_registry, get_reconciliation_store, get_session_charger_map))
     return app
 
 
@@ -73,3 +77,21 @@ def test_reconciliation_export_endpoint_returns_csv():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     assert "CDR-1" in response.text
+
+
+def test_session_binding_endpoint_records_the_charger_mapping():
+    session_charger_map = InMemorySessionChargerMap()
+    client = TestClient(
+        _build_app(InMemoryPartnerRegistry(), InMemoryReconciliationResultStore(), session_charger_map)
+    )
+
+    response = client.post(
+        "/admin/ocpi/sessions/SESSION-1/binding",
+        json={"charger_id": "CP-001", "tenant_id": str(TENANT_ID), "connector_id": 1},
+    )
+
+    assert response.status_code == 200
+    binding = asyncio.run(session_charger_map.get_charger_for_session("SESSION-1"))
+    assert binding is not None
+    assert binding.charger_id == "CP-001"
+    assert binding.connector_id == 1

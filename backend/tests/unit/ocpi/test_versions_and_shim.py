@@ -5,6 +5,7 @@ against an in-process app (no real network)."""
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -17,6 +18,7 @@ from evagg.ocpi.domain import OCPIGeoLocation, OCPILocation
 from evagg.ocpi.errors import OcpiErrorCode, map_exception_to_ocpi_error
 from evagg.ocpi.locations import InMemoryLocationRepository
 from evagg.ocpi.partner_store import InMemoryPartnerRegistry, Partner
+from evagg.ocpi.charging_profiles import ChargingProfileService, InMemoryActiveChargingProfileStore, InMemorySessionChargerMap
 from evagg.ocpi.router import build_ocpi_router, register_ocpi_exception_handlers
 from evagg.ocpi.tariff_bridge import OcpiTariffCatalog
 from evagg.ocpi.v221.adapters import location_to_v221
@@ -29,6 +31,25 @@ TENANT_ID = uuid.uuid4()
 def _build_tariff_catalog(tariff_service: TariffService | None = None) -> OcpiTariffCatalog:
     service = tariff_service or TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider())
     return OcpiTariffCatalog(service, party_id="EVG", country_code="US")
+
+
+def _build_charging_profile_service() -> ChargingProfileService:
+    from evagg.ocpp_gateway.commands import (
+        FakeCommandTransport,
+        InMemoryCommandLogStore,
+        InMemoryConnectorCapacityProvider,
+        InMemoryFirmwareUpdateStore,
+        RemoteCommandService,
+    )
+    from evagg.ocpp_gateway.presence import InMemoryPresenceRegistry
+
+    command_service = RemoteCommandService(
+        InMemoryPresenceRegistry(), InMemoryCommandLogStore(), FakeCommandTransport(), InMemoryFirmwareUpdateStore()
+    )
+    return ChargingProfileService(
+        InMemorySessionChargerMap(), InMemoryActiveChargingProfileStore(), command_service,
+        InMemoryConnectorCapacityProvider(),
+    )
 
 
 def _sample_location() -> OCPILocation:
@@ -47,7 +68,7 @@ def _sample_location() -> OCPILocation:
     )
 
 
-def _build_app(partner_registry, location_repo, tariff_catalog=None) -> FastAPI:
+def _build_app(partner_registry, location_repo, tariff_catalog=None, charging_profile_service=None) -> FastAPI:
     app = FastAPI()
     register_ocpi_exception_handlers(app)
 
@@ -60,7 +81,12 @@ def _build_app(partner_registry, location_repo, tariff_catalog=None) -> FastAPI:
     async def get_tariff_catalog():
         return tariff_catalog or _build_tariff_catalog()
 
-    app.include_router(build_ocpi_router(get_partner_registry, get_location_repo, get_tariff_catalog))
+    async def get_charging_profile_service():
+        return charging_profile_service or _build_charging_profile_service()
+
+    app.include_router(
+        build_ocpi_router(get_partner_registry, get_location_repo, get_tariff_catalog, get_charging_profile_service)
+    )
     return app
 
 
@@ -284,3 +310,67 @@ def test_get_tariff_with_malformed_id_returns_2005_not_500():
 
     assert response.status_code == 404
     assert response.json()["status_code"] == int(OcpiErrorCode.UNKNOWN_TARIFF)
+
+
+# --- ChargingProfiles module (2.2.1+ only) ----------------------------------
+
+
+def test_put_charging_profile_unknown_session_returns_unknown_session_result():
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository()))
+
+    response = client.put(
+        "/ocpi/2.2.1/chargingprofiles/no-such-session",
+        json={"charging_profile": {"charging_rate_unit": "W", "charging_profile_period": [{"start_period": 0, "limit": 7000}]}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "UNKNOWN_SESSION"
+
+
+def test_put_charging_profile_dispatches_and_accepts():
+    from evagg.ocpi.charging_profiles import InMemoryActiveChargingProfileStore, InMemorySessionChargerMap, SessionChargerBinding
+    from evagg.ocpp_gateway.commands import (
+        CommandOutcome, CommandStatus, FakeCommandTransport, InMemoryCommandLogStore,
+        InMemoryConnectorCapacityProvider, InMemoryFirmwareUpdateStore, RemoteCommandService,
+    )
+    from evagg.ocpp_gateway.presence import InMemoryPresenceRegistry
+
+    presence = InMemoryPresenceRegistry()
+    asyncio.run(presence.mark_online("CP-1", TENANT_ID, node_id="node-a", protocol_version="ocpp1.6", ttl_seconds=600))
+    transport = FakeCommandTransport()
+    transport.set_outcome("CP-1", CommandOutcome(CommandStatus.ACCEPTED, {}))
+    command_service = RemoteCommandService(
+        presence, InMemoryCommandLogStore(), transport, InMemoryFirmwareUpdateStore()
+    )
+    session_map = InMemorySessionChargerMap()
+    session_map.set_binding("SESSION-1", SessionChargerBinding("CP-1", TENANT_ID, connector_id=1))
+    service = ChargingProfileService(
+        session_map, InMemoryActiveChargingProfileStore(), command_service, InMemoryConnectorCapacityProvider()
+    )
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), charging_profile_service=service))
+
+    put_response = client.put(
+        "/ocpi/2.2.1/chargingprofiles/SESSION-1",
+        json={
+            "charging_profile": {"charging_rate_unit": "W", "charging_profile_period": [{"start_period": 0, "limit": 7000}]},
+            "duration": 3600,
+        },
+    )
+    get_response = client.get("/ocpi/2.2.1/chargingprofiles/SESSION-1")
+
+    assert put_response.status_code == 200
+    assert put_response.json()["result"] == "ACCEPTED"
+    assert get_response.status_code == 200
+    body = get_response.json()
+    assert body["result"] == "ACCEPTED"
+    assert body["profile"]["duration"] == 3600
+    assert body["profile"]["charging_profile_period"] == [{"start_period": 0, "limit": 7000}]
+
+
+def test_get_charging_profile_v230_for_unknown_session():
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository()))
+
+    response = client.get("/ocpi/2.3.0/chargingprofiles/no-such-session")
+
+    assert response.status_code == 200
+    assert response.json() == {"result": "UNKNOWN_SESSION", "profile": None}

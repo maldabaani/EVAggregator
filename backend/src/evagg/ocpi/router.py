@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from evagg.ocpi.charging_preferences import ChargingPreferencesService
 from evagg.ocpi.charging_profiles import ChargingProfilePeriod, ChargingProfileService
 from evagg.ocpi.commands import OcpiCommandResult, OcpiCommandService
 from evagg.ocpi.errors import OcpiError, OcpiErrorCode
@@ -69,6 +70,24 @@ def _command_result_dict(result: OcpiCommandResult) -> dict:
     return {"result": result.result.value, "session_id": result.session_id, "reason": result.reason}
 
 
+class ChargingPreferencesRequest(BaseModel):
+    profile_type: str
+    departure_time: datetime | None = None
+    energy_need_kwh: float | None = None
+    discharge_allowed: bool | None = None
+
+
+def _charging_preferences_dict(preferences) -> dict | None:
+    if preferences is None:
+        return None
+    return {
+        "profile_type": preferences.profile_type,
+        "departure_time": preferences.departure_time.isoformat() if preferences.departure_time else None,
+        "energy_need_kwh": preferences.energy_need_kwh,
+        "discharge_allowed": preferences.discharge_allowed,
+    }
+
+
 class _ChargingProfilePeriodPayload(BaseModel):
     start_period: int
     limit: float
@@ -111,6 +130,7 @@ def build_ocpi_router(
     tariff_catalog_dependency,
     charging_profile_service_dependency,
     command_service_dependency,
+    charging_preferences_service_dependency,
     base_url: str = "https://api.example.com/ocpi",
 ) -> APIRouter:
     router = APIRouter(prefix="/ocpi")
@@ -317,5 +337,30 @@ def build_ocpi_router(
 
     _register_commands("2.2.1")
     _register_commands("2.3.0")
+
+    # --- Charging Preferences (2.2.1+ only) ---------------------------------
+
+    def _register_charging_preferences(version: str) -> None:
+        @router.put(f"/{version}/sessions/{{session_id}}/charging_preferences", name=f"set_charging_prefs_{version}")
+        async def set_charging_preferences(
+            session_id: str,
+            body: ChargingPreferencesRequest,
+            service: ChargingPreferencesService = Depends(charging_preferences_service_dependency),
+        ) -> dict:
+            result = await service.set_charging_preferences(
+                session_id, body.profile_type, body.departure_time, body.energy_need_kwh, body.discharge_allowed
+            )
+            return {"result": result.value}
+
+        @router.get(f"/{version}/sessions/{{session_id}}/charging_preferences", name=f"get_charging_prefs_{version}")
+        async def get_charging_preferences(
+            session_id: str,
+            service: ChargingPreferencesService = Depends(charging_preferences_service_dependency),
+        ) -> dict:
+            preferences = await service.get_charging_preferences(session_id)
+            return {"preferences": _charging_preferences_dict(preferences)}
+
+    _register_charging_preferences("2.2.1")
+    _register_charging_preferences("2.3.0")
 
     return router

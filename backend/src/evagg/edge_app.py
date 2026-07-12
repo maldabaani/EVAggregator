@@ -64,9 +64,14 @@ async def _ocpi_command_service():
     return services.ocpi_command_service
 
 
+async def _charging_preferences_service():
+    return services.charging_preferences_service
+
+
 app.include_router(
     build_ocpi_router(
-        _partner_registry, _location_repository, _tariff_catalog, _charging_profile_service, _ocpi_command_service
+        _partner_registry, _location_repository, _tariff_catalog, _charging_profile_service, _ocpi_command_service,
+        _charging_preferences_service,
     )
 )
 app.include_router(build_admin_router(_partner_registry, _reconciliation_store, _session_charger_map))

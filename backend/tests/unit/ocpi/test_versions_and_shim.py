@@ -18,7 +18,13 @@ from evagg.ocpi.domain import OCPIGeoLocation, OCPILocation
 from evagg.ocpi.errors import OcpiErrorCode, map_exception_to_ocpi_error
 from evagg.ocpi.locations import InMemoryLocationRepository
 from evagg.ocpi.partner_store import InMemoryPartnerRegistry, Partner
-from evagg.ocpi.charging_profiles import ChargingProfileService, InMemoryActiveChargingProfileStore, InMemorySessionChargerMap
+from evagg.ocpi.charging_preferences import ChargingPreferencesService, InMemoryChargingPreferencesStore
+from evagg.ocpi.charging_profiles import (
+    ChargingProfileService,
+    InMemoryActiveChargingProfileStore,
+    InMemorySessionChargerMap,
+    SessionChargerBinding,
+)
 from evagg.ocpi.commands import OcpiCommandService
 from evagg.ocpi.router import build_ocpi_router, register_ocpi_exception_handlers
 from evagg.ocpi.tariff_bridge import OcpiTariffCatalog
@@ -69,6 +75,12 @@ def _build_ocpi_command_service() -> OcpiCommandService:
     return OcpiCommandService(InMemorySessionChargerMap(), InMemoryTransactionRepository(), command_service)
 
 
+def _build_charging_preferences_service(session_charger_map=None) -> ChargingPreferencesService:
+    return ChargingPreferencesService(
+        session_charger_map or InMemorySessionChargerMap(), InMemoryChargingPreferencesStore()
+    )
+
+
 def _sample_location() -> OCPILocation:
     return OCPILocation(
         id="LOC-1",
@@ -86,7 +98,8 @@ def _sample_location() -> OCPILocation:
 
 
 def _build_app(
-    partner_registry, location_repo, tariff_catalog=None, charging_profile_service=None, ocpi_command_service=None
+    partner_registry, location_repo, tariff_catalog=None, charging_profile_service=None, ocpi_command_service=None,
+    charging_preferences_service=None,
 ) -> FastAPI:
     app = FastAPI()
     register_ocpi_exception_handlers(app)
@@ -106,10 +119,13 @@ def _build_app(
     async def get_ocpi_command_service():
         return ocpi_command_service or _build_ocpi_command_service()
 
+    async def get_charging_preferences_service():
+        return charging_preferences_service or _build_charging_preferences_service()
+
     app.include_router(
         build_ocpi_router(
             get_partner_registry, get_location_repo, get_tariff_catalog, get_charging_profile_service,
-            get_ocpi_command_service,
+            get_ocpi_command_service, get_charging_preferences_service,
         )
     )
     return app
@@ -508,3 +524,55 @@ def test_cancel_reservation_endpoint_dispatches_and_accepts():
 
     assert response.status_code == 200
     assert response.json()["result"] == "ACCEPTED"
+
+
+# --- Charging Preferences module (2.2.1+ only) ------------------------------
+
+
+def test_set_charging_preferences_unknown_session_is_not_possible():
+    client = TestClient(_build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository()))
+
+    response = client.put(
+        "/ocpi/2.2.1/sessions/no-such-session/charging_preferences", json={"profile_type": "FAST"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "NOT_POSSIBLE"
+
+
+def test_set_charging_preferences_accepted_and_retrievable():
+    session_map = InMemorySessionChargerMap()
+    session_map.set_binding("SESSION-1", SessionChargerBinding("CP-1", TENANT_ID, connector_id=1))
+    service = _build_charging_preferences_service(session_map)
+    client = TestClient(
+        _build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), charging_preferences_service=service)
+    )
+
+    put_response = client.put(
+        "/ocpi/2.3.0/sessions/SESSION-1/charging_preferences",
+        json={"profile_type": "REGULAR", "departure_time": "2026-07-12T18:00:00Z", "energy_need_kwh": 15.0},
+    )
+    get_response = client.get("/ocpi/2.3.0/sessions/SESSION-1/charging_preferences")
+
+    assert put_response.status_code == 200
+    assert put_response.json()["result"] == "ACCEPTED"
+    assert get_response.status_code == 200
+    prefs = get_response.json()["preferences"]
+    assert prefs["profile_type"] == "REGULAR"
+    assert prefs["energy_need_kwh"] == 15.0
+
+
+def test_set_charging_preferences_missing_departure_time_returns_departure_required():
+    session_map = InMemorySessionChargerMap()
+    session_map.set_binding("SESSION-1", SessionChargerBinding("CP-1", TENANT_ID, connector_id=1))
+    service = _build_charging_preferences_service(session_map)
+    client = TestClient(
+        _build_app(InMemoryPartnerRegistry(), InMemoryLocationRepository(), charging_preferences_service=service)
+    )
+
+    response = client.put(
+        "/ocpi/2.2.1/sessions/SESSION-1/charging_preferences", json={"profile_type": "GREEN"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "DEPARTURE_REQUIRED"

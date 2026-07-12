@@ -65,6 +65,7 @@ from evagg.core.config import settings
 from evagg.fleet.cost_report import CostReportService
 from evagg.fleet.rollup import InMemoryRollupStore
 from evagg.gateway.rate_limit import RateLimiter, RedisRateLimiter
+from evagg.ocpi.charging_preferences import ChargingPreferencesService, InMemoryChargingPreferencesStore
 from evagg.ocpi.charging_profiles import (
     ChargingProfileService,
     InMemoryActiveChargingProfileStore,
@@ -163,6 +164,7 @@ class Services:
     charging_profile_service: ChargingProfileService
     session_charger_map: InMemorySessionChargerMap
     ocpi_command_service: OcpiCommandService
+    charging_preferences_service: ChargingPreferencesService
     reconciliation_store: InMemoryReconciliationResultStore
     partner_push_client: PartnerPushClient
     session_push_client: SessionPushClient
@@ -345,6 +347,10 @@ def build_services() -> Services:
         transaction_repository=transaction_repository,
         command_service=remote_command_service,
     )
+    charging_preferences_service = ChargingPreferencesService(
+        session_charger_map=session_charger_map,
+        store=InMemoryChargingPreferencesStore(),
+    )
 
     connection_manager = ConnectionManager(
         presence=presence_registry,
@@ -379,6 +385,7 @@ def build_services() -> Services:
         charging_profile_service=charging_profile_service,
         session_charger_map=session_charger_map,
         ocpi_command_service=ocpi_command_service,
+        charging_preferences_service=charging_preferences_service,
         reconciliation_store=reconciliation_store,
         partner_push_client=partner_push_client,
         session_push_client=session_push_client,

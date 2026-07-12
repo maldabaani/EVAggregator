@@ -1,24 +1,53 @@
+# Python (backend/) — no nested .gitignore there, so this is authoritative
 __pycache__/
-*.pyc
-.venv/
-venv/
+*.py[cod]
 *.egg-info/
+.eggs/
+build/
+dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.hypothesis/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+.venv/
+venv/
+
+# Secrets / local config — real values never committed, only *.example files
 .env
-*.log
+.env.*
+!.env.example
 
-# Angular
-portal/node_modules/
-portal/dist/
+# Portal (Angular) and mobile (Flutter) each already have their own
+# thorough .gitignore (node_modules, dist, .angular/cache, .dart_tool,
+# platform build dirs, IDE files, etc.) — see portal/.gitignore and
+# mobile/.gitignore. Deliberately NOT repeating their .vscode/.idea rules
+# here: portal/.gitignore tracks 3 specific .vscode/*.json files via
+# negation (`.vscode/*` + `!.vscode/tasks.json` etc.) — a blanket `.vscode/`
+# at this level would exclude that whole directory before their negation
+# ever gets a chance to apply (git can't re-include a file whose parent
+# directory is already excluded), silently making those files un-re-addable.
+# If backend/ ever grows its own IDE folders, give it its own .gitignore
+# with the same scoped pattern instead of adding one here.
 
-# Flutter
-mobile/.dart_tool/
-mobile/build/
-mobile/.flutter-plugins
-mobile/.flutter-plugins-dependencies
+# IDE / editor (file-level only — see note above on why not .vscode//.idea/)
+*.iml
+*.swp
+*.swo
+*~
 
+# OS
 .DS_Store
+.AppleDouble
+Thumbs.db
+Desktop.ini
+
+# Misc local scratch
+*.log
+*.tmp
+tmp/
+docker-compose.override.yml

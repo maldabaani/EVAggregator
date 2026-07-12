@@ -31,6 +31,7 @@ from evagg.core.observability import configure_logging, instrument_app
 from evagg.core.tenancy import TenantContextMiddleware
 from evagg.fleet.cost_report_router import build_cost_report_router
 from evagg.gateway.middleware import GatewaySignatureMiddleware
+from evagg.ocpp_gateway.command_router import build_command_router
 from evagg.ocpp_gateway.presence_api import build_presence_router
 
 configure_logging()
@@ -81,6 +82,14 @@ async def _presence_registry():
     return services.presence_registry
 
 
+async def _remote_command_service():
+    return services.remote_command_service
+
+
+async def _command_log_store():
+    return services.command_log_store
+
+
 app.include_router(build_tariff_router(_tariff_service))
 app.include_router(build_wallet_router(_wallet_service))
 app.include_router(build_stripe_webhook_router(_wallet_service, settings.stripe_webhook_secret))
@@ -90,6 +99,7 @@ app.include_router(
     build_session_start_router(_session_start_service, _autocharge_mac_store, _plug_and_charge_validator)
 )
 app.include_router(build_presence_router(_presence_registry))
+app.include_router(build_command_router(_remote_command_service, _command_log_store))
 
 app.add_middleware(TenantContextMiddleware)
 app.add_middleware(GatewaySignatureMiddleware)

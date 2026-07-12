@@ -63,6 +63,11 @@ class CommandLogStore(Protocol):
 
     async def get(self, command_id: uuid.UUID) -> CommandLogRecord | None: ...
 
+    async def list_recent(self, charger_id: str, limit: int = 20) -> list[CommandLogRecord]:
+        """Most-recently-requested first — what a portal command panel's
+        "recent command log" pane polls."""
+        ...
+
 
 class InMemoryCommandLogStore:
     def __init__(self) -> None:
@@ -90,6 +95,15 @@ class InMemoryCommandLogStore:
 
     async def get(self, command_id: uuid.UUID) -> CommandLogRecord | None:
         return self._records.get(command_id)
+
+    async def list_recent(self, charger_id: str, limit: int = 20) -> list[CommandLogRecord]:
+        # Insertion order (dicts are ordered), reversed — not a sort on
+        # `requested_at`, since two commands issued within the same
+        # microsecond would otherwise tie and fall back to whatever order
+        # a stable sort happens to leave them in.
+        matches = [record for record in self._records.values() if record.charger_id == charger_id]
+        matches.reverse()
+        return matches[:limit]
 
 
 # --- Transport (NATS request-reply, real wiring in Task 2.4) -----------

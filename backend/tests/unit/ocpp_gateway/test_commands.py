@@ -151,3 +151,35 @@ async def test_command_routed_to_correct_gateway_node_via_presence_lookup():
 
     assert transport.calls[0][0] == "node-xyz"
     assert transport.calls[0][1] == CHARGER_ID
+
+
+@pytest.mark.asyncio
+async def test_list_recent_returns_most_recent_first_scoped_to_charger():
+    service, presence, command_log, transport, _ = _build_service()
+    await _mark_online(presence)
+    transport.set_outcome(CHARGER_ID, CommandOutcome(CommandStatus.ACCEPTED, {}))
+
+    await service.send_command(CHARGER_ID, TENANT_ID, "ClearCache", {})
+    await service.send_command(CHARGER_ID, TENANT_ID, "Reset", {"type": "Soft"})
+    with pytest.raises(ChargerOfflineError):
+        # Never marked online — proves list_recent(CHARGER_ID) doesn't pick
+        # up this record even though it exists in the log.
+        await service.send_command("some-other-charger", TENANT_ID, "ClearCache", {})
+
+    recent = await command_log.list_recent(CHARGER_ID)
+
+    assert [record.type for record in recent] == ["Reset", "ClearCache"]
+
+
+@pytest.mark.asyncio
+async def test_list_recent_respects_limit():
+    service, presence, command_log, transport, _ = _build_service()
+    await _mark_online(presence)
+    transport.set_outcome(CHARGER_ID, CommandOutcome(CommandStatus.ACCEPTED, {}))
+
+    for _ in range(3):
+        await service.send_command(CHARGER_ID, TENANT_ID, "ClearCache", {})
+
+    recent = await command_log.list_recent(CHARGER_ID, limit=2)
+
+    assert len(recent) == 2

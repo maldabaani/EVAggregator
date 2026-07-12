@@ -1,0 +1,74 @@
+<div class="partner-detail">
+  <nav class="tabs">
+    <button type="button" [class.tabs__item--active]="activeTab === 'credentials'" class="tabs__item" (click)="setTab('credentials')" data-testid="tab-credentials">
+      Credentials
+    </button>
+    <button type="button" [class.tabs__item--active]="activeTab === 'price-lists'" class="tabs__item" (click)="setTab('price-lists')" data-testid="tab-price-lists">
+      Price Lists
+    </button>
+    <button type="button" [class.tabs__item--active]="activeTab === 'reconciliation'" class="tabs__item" (click)="setTab('reconciliation')" data-testid="tab-reconciliation">
+      Reconciliation
+    </button>
+  </nav>
+
+  <section *ngIf="activeTab === 'credentials'" data-testid="panel-credentials">
+    <h2>Credentials</h2>
+    <button type="button" (click)="rotateToken()" data-testid="rotate-token-button">Rotate token</button>
+    <p *ngIf="rotatedToken" data-testid="rotated-token">New token_a: {{ rotatedToken }}</p>
+  </section>
+
+  <section *ngIf="activeTab === 'price-lists'" data-testid="panel-price-lists">
+    <h2>Price Lists</h2>
+    <form (ngSubmit)="attachPriceList()" data-testid="price-list-form">
+      <label>
+        Connector type
+        <select name="connectorType" [(ngModel)]="priceListForm.connectorType">
+          <option value="CCS2">CCS2</option>
+          <option value="Type2">Type2</option>
+          <option value="CHAdeMO">CHAdeMO</option>
+        </select>
+      </label>
+      <label>
+        Tariff ID
+        <input name="tariffId" [(ngModel)]="priceListForm.tariffId" required data-testid="tariff-id-input" />
+      </label>
+      <label>
+        Effective from
+        <input type="datetime-local" name="effectiveFrom" [(ngModel)]="priceListForm.effectiveFrom" required data-testid="effective-from-input" />
+      </label>
+      <button type="submit" data-testid="attach-price-list-button">Attach</button>
+    </form>
+  </section>
+
+  <section *ngIf="activeTab === 'reconciliation'" data-testid="panel-reconciliation">
+    <h2>Reconciliation</h2>
+    <label>
+      Status
+      <select [(ngModel)]="reconciliationStatusFilter" (ngModelChange)="loadReconciliation()" data-testid="reconciliation-status-filter">
+        <option value="">All</option>
+        <option value="matched">Matched</option>
+        <option value="mismatched">Mismatched</option>
+        <option value="pending">Pending</option>
+      </select>
+    </label>
+    <a [href]="exportUrl" data-testid="export-csv-link">Export CSV</a>
+    <table data-testid="reconciliation-table">
+      <thead>
+        <tr>
+          <th>Local CDR</th>
+          <th>Partner CDR</th>
+          <th>Status</th>
+          <th>Delta</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let entry of reconciliationEntries">
+          <td>{{ entry.local_cdr_id || '—' }}</td>
+          <td>{{ entry.partner_cdr_uid }}</td>
+          <td>{{ entry.status }}</td>
+          <td>{{ entry.delta_fraction !== null ? (entry.delta_fraction * 100 | number: '1.1-2') + '%' : '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>

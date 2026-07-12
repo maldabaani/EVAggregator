@@ -1,0 +1,134 @@
+<div class="cost-dashboard">
+  <header class="page-header">
+    <h1>Cost allocation dashboard</h1>
+    <p class="page-header__subtitle">Session spend across your fleet, grouped by driver or by site.</p>
+  </header>
+
+  <section class="filter-card" [formGroup]="form">
+    <div class="filter-card__field">
+      <label for="team-id-input">Team ID</label>
+      <input id="team-id-input" type="text" formControlName="teamId" placeholder="Paste a team ID" data-testid="team-id-input" />
+    </div>
+
+    <div class="filter-card__field">
+      <label for="date-from-input">From</label>
+      <input id="date-from-input" type="date" formControlName="dateFrom" data-testid="date-from-input" />
+    </div>
+
+    <div class="filter-card__field">
+      <label for="date-to-input">To</label>
+      <input id="date-to-input" type="date" formControlName="dateTo" data-testid="date-to-input" />
+    </div>
+
+    <div class="filter-card__field">
+      <span class="filter-card__label">Group by</span>
+      <div class="segmented" role="group" aria-label="Group by">
+        <button
+          type="button"
+          class="segmented__option"
+          [class.segmented__option--active]="groupBy === groupByDriver"
+          (click)="setGroupBy(groupByDriver)"
+          data-testid="group-by-driver-button"
+        >
+          Driver
+        </button>
+        <button
+          type="button"
+          class="segmented__option"
+          [class.segmented__option--active]="groupBy === groupBySite"
+          (click)="setGroupBy(groupBySite)"
+          data-testid="group-by-site-button"
+        >
+          Site
+        </button>
+      </div>
+    </div>
+
+    <button type="button" class="button button--primary" (click)="load()" data-testid="load-report-button">
+      Run report
+    </button>
+  </section>
+
+  <div *ngIf="loading" class="state-panel" data-testid="loading-state">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Loading cost report…</p>
+  </div>
+
+  <div *ngIf="errorMessage && !loading" class="state-panel state-panel--error" data-testid="error-state">
+    <p>{{ errorMessage }}</p>
+    <button type="button" class="button button--secondary" (click)="load()" data-testid="retry-button">Retry</button>
+  </div>
+
+  <ng-container *ngIf="report && !loading && !errorMessage">
+    <div *ngIf="report.incompleteDates.length > 0" class="banner banner--warning" data-testid="incomplete-dates-banner">
+      <span class="banner__icon" aria-hidden="true">&#9888;</span>
+      <span
+        >Rollup data is incomplete for {{ report.incompleteDates.length }}
+        {{ report.incompleteDates.length === 1 ? 'day' : 'days' }} in this range — totals below may
+        undercount. Affected: {{ report.incompleteDates.join(', ') }}</span
+      >
+    </div>
+
+    <section class="stat-row">
+      <div class="stat-tile" data-testid="stat-sessions">
+        <span class="stat-tile__label">Sessions</span>
+        <span class="stat-tile__value">{{ report.totalSessionCount }}</span>
+      </div>
+      <div class="stat-tile" data-testid="stat-energy">
+        <span class="stat-tile__label">Energy delivered</span>
+        <span class="stat-tile__value">{{ report.totalKwh }}<span class="stat-tile__unit">kWh</span></span>
+      </div>
+      <div class="stat-tile stat-tile--accent" data-testid="stat-total-cost">
+        <span class="stat-tile__label">Total cost</span>
+        <span class="stat-tile__value">{{ totalCostLabel }}</span>
+      </div>
+      <div class="stat-tile" data-testid="stat-avg-cost">
+        <span class="stat-tile__label">Avg. cost / session</span>
+        <span class="stat-tile__value">{{ averageCostPerSessionLabel }}</span>
+      </div>
+    </section>
+
+    <section class="report-table-card">
+      <div class="report-table-card__header">
+        <h2>By {{ groupBy }}</h2>
+        <a
+          *ngIf="rowViews.length > 0"
+          class="button button--secondary"
+          [href]="csvUrl"
+          download
+          data-testid="export-csv-link"
+        >
+          Export CSV
+        </a>
+      </div>
+
+      <div *ngIf="rowViews.length === 0" class="state-panel" data-testid="empty-state">
+        <p>No sessions in this date range.</p>
+      </div>
+
+      <table *ngIf="rowViews.length > 0" class="report-table" data-testid="report-table">
+        <thead>
+          <tr>
+            <th scope="col">{{ groupBy === groupByDriver ? 'Driver' : 'Site' }}</th>
+            <th scope="col">Sessions</th>
+            <th scope="col">Energy (kWh)</th>
+            <th scope="col">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of rowViews" data-testid="report-row">
+            <td class="report-table__key" [title]="row.key">{{ row.key }}</td>
+            <td>{{ row.sessionCount }}</td>
+            <td>{{ row.kwhTotal }}</td>
+            <td class="report-table__cost">
+              <span class="meter" aria-hidden="true">
+                <span class="meter__fill" [style.width.%]="row.barPercent"></span>
+              </span>
+              <span class="report-table__cost-value" data-testid="report-row-cost">{{ row.costLabel }}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </ng-container>
+</div>

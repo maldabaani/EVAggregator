@@ -1,0 +1,64 @@
+<div class="tariff-builder" [formGroup]="form">
+  <h1>Tariff Builder</h1>
+
+  <label>
+    Name
+    <input type="text" formControlName="name" data-testid="tariff-name-input" />
+  </label>
+
+  <label>
+    Tenant ID
+    <input type="text" formControlName="tenantId" data-testid="tenant-id-input" />
+  </label>
+
+  <section formArrayName="components" class="components">
+    <h2>Components</h2>
+    <div *ngFor="let group of components.controls; let i = index" [formGroupName]="i" class="component-row" data-testid="component-row">
+      <select formControlName="type" data-testid="component-type-select">
+        <option value="energy">Energy (per kWh)</option>
+        <option value="time">Time (per minute)</option>
+        <option value="flat">Flat fee</option>
+        <option value="idle">Idle fee</option>
+      </select>
+      <label>
+        Price (minor units)
+        <input type="number" formControlName="priceMinorUnits" data-testid="component-price-input" />
+      </label>
+      <label>
+        Step size
+        <input type="number" formControlName="stepSize" data-testid="component-step-input" />
+      </label>
+      <label *ngIf="group.get('type')?.value === 'idle'">
+        Grace period (min)
+        <input type="number" formControlName="appliesAfterMinutes" data-testid="component-grace-input" />
+      </label>
+      <button type="button" (click)="removeComponent(i)" data-testid="remove-component-button">Remove</button>
+    </div>
+
+    <div class="add-buttons">
+      <button type="button" (click)="addComponent('energy')" data-testid="add-energy-button">+ Energy</button>
+      <button type="button" (click)="addComponent('time')" data-testid="add-time-button">+ Time</button>
+      <button type="button" (click)="addComponent('flat')" data-testid="add-flat-button">+ Flat</button>
+      <button type="button" (click)="addComponent('idle')" data-testid="add-idle-button">+ Idle</button>
+    </div>
+  </section>
+
+  <aside class="preview" data-testid="preview-panel">
+    <h2>Live Preview</h2>
+    <p>Sample session: {{ sampleSession.durationMinutes }} min, {{ sampleSession.kwh }} kWh</p>
+    <p *ngIf="previewTotalMinorUnits !== null; else invalidPreview" data-testid="preview-total">
+      Total: {{ previewTotalMinorUnits }} minor units
+    </p>
+    <ng-template #invalidPreview>
+      <p data-testid="preview-invalid">Fix step sizes to see a preview.</p>
+    </ng-template>
+  </aside>
+
+  <p *ngIf="!hasRequiredComponent" class="validation-error" data-testid="missing-component-error">
+    At least one energy or time component is required.
+  </p>
+
+  <button type="button" (click)="save()" [disabled]="!canSave" data-testid="save-button">Save tariff</button>
+  <p *ngIf="saveError" data-testid="save-error">{{ saveError }}</p>
+  <p *ngIf="savedTariffId" data-testid="saved-confirmation">Saved as {{ savedTariffId }}</p>
+</div>

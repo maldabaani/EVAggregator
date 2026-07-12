@@ -43,18 +43,15 @@ jobs:
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
-      # NOTE: GitHub Actions' `services:` block can't override the container
-      # command, so this plain image runs without JetStream (`-js`) enabled.
-      # Fine for the current DB/RLS integration tests; Epic 2's NATS-backed
-      # tests will need a custom-built service image or a docker-run step.
-      nats:
-        image: nats:2.10-alpine
-        ports: ["4222:4222"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # GitHub Actions' `services:` block can't override a container's
+      # command, and JetStream needs `-js` — so NATS runs via a plain
+      # docker-run step instead of `services:`.
+      - run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
       - run: pip install -e ".[dev]"
       - run: alembic upgrade head
       - run: python -m evagg.scripts.audit_rls

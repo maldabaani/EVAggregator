@@ -6,16 +6,23 @@ Verified manually against a real local Postgres 16 during development (see
 commit history): fresh-DB apply, downgrade, fail-closed zero-row reads with no
 tenant context, and cross-tenant isolation between two seeded organizations
 all behaved as asserted below. TimescaleDB-specific steps (hypertable
-conversion, continuous aggregate, retention/compression) require the
-`timescaledb` extension and are annotated accordingly — they were reviewed
-against the Timescale API but could not be executed in the sandbox that wrote
-this suite (no TimescaleDB extension available locally, and container image
-pulls were blocked by network policy). Runs for real the first time this
-suite executes in CI against the `timescale/timescaledb` docker-compose image.
+conversion, continuous aggregate, retention) require the `timescaledb`
+extension and are annotated accordingly — they were reviewed against the
+Timescale API but could not be executed in the sandbox that wrote this suite
+(no TimescaleDB extension available locally, and container image pulls were
+blocked by network policy). Ran for real the first time this suite executed
+in CI against the `timescale/timescaledb` docker-compose image, which
+surfaced three real migration bugs no local review could have caught: a
+transaction-block restriction on continuous aggregate creation, and two
+rounds of RLS/TimescaleDB-feature conflicts (continuous aggregates and RLS
+have an orderable conflict; RLS and compression do not — TimescaleDB refuses
+to combine them on the same hypertable under any ordering, which is why
+`meter_value`/`status_log` no longer use compression at all).
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import asyncpg
@@ -24,7 +31,7 @@ from alembic import command
 from alembic.config import Config
 
 from evagg.core.config import settings
-from tests.integration.conftest import requires_timescaledb
+from conftest import requires_timescaledb
 
 ALEMBIC_INI = "alembic.ini"
 
@@ -57,8 +64,13 @@ def test_schema_migration_applies_cleanly_with_existing_seed_data():
 @requires_timescaledb
 async def test_rls_fails_closed_without_tenant_context_and_isolates_tenants():
     cfg = _alembic_config()
-    command.downgrade(cfg, "base")
-    command.upgrade(cfg, "head")
+    # `command.upgrade`/`command.downgrade` run env.py's async migrations via
+    # their own internal `asyncio.run(...)` (see alembic/env.py) — calling
+    # them directly from this already-async test raises "asyncio.run()
+    # cannot be called from a running event loop". Running them in a thread
+    # gives them a loop-free context to create their own event loop in.
+    await asyncio.to_thread(command.downgrade, cfg, "base")
+    await asyncio.to_thread(command.upgrade, cfg, "head")
 
     app_dsn = settings.database_url.replace("+asyncpg", "")
     admin_dsn = settings.migration_database_url.replace("+asyncpg", "")
@@ -104,4 +116,4 @@ async def test_rls_fails_closed_without_tenant_context_and_isolates_tenants():
         assert tenant_b_rows == []
     finally:
         await app_conn.close()
-        command.downgrade(cfg, "base")
+        await asyncio.to_thread(command.downgrade, cfg, "base")

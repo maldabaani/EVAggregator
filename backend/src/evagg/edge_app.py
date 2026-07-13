@@ -19,6 +19,7 @@ from evagg.composition import build_services, shutdown_services, startup_service
 from evagg.core.config import settings
 from evagg.core.observability import configure_logging, instrument_app
 from evagg.driver_app.map_router import build_map_router
+from evagg.driver_app.reservation_router import build_reservation_router
 from evagg.driver_app.session_start_forwarder import mount_session_start_forwarder
 from evagg.driver_app.vehicle_router import build_vehicle_router
 from evagg.driver_app.wallet_forwarder import mount_wallet_forwarder
@@ -92,9 +93,14 @@ async def _vehicle_store():
     return services.vehicle_store
 
 
+async def _driver_reservation_service():
+    return services.driver_reservation_service
+
+
 app.include_router(build_driver_auth_router(_driver_account_store, _driver_refresh_token_store))
 app.include_router(build_map_router(_location_repository))
 app.include_router(build_vehicle_router(_vehicle_store))
+app.include_router(build_reservation_router(_driver_reservation_service))
 mount_session_start_forwarder(app, settings.internal_services_base_url)
 mount_wallet_forwarder(app, settings.internal_services_base_url)
 app.include_router(

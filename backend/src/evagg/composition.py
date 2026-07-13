@@ -65,6 +65,7 @@ from evagg.core.config import settings
 from evagg.fleet.cost_report import CostReportService
 from evagg.fleet.rollup import InMemoryRollupStore
 from evagg.gateway.rate_limit import RateLimiter, RedisRateLimiter
+from evagg.driver_app.reservations import DriverReservationService
 from evagg.driver_app.vehicles import InMemoryVehicleStore, VehicleStore
 from evagg.gateway.refresh_store import InMemoryRefreshTokenStore, RefreshTokenStore
 from evagg.identity.driver_auth import DriverAccountStore, InMemoryDriverAccountStore
@@ -168,6 +169,7 @@ class Services:
     charging_profile_service: ChargingProfileService
     session_charger_map: InMemorySessionChargerMap
     ocpi_command_service: OcpiCommandService
+    driver_reservation_service: DriverReservationService
     charging_preferences_service: ChargingPreferencesService
     reconciliation_store: InMemoryReconciliationResultStore
     price_list_store: PriceListStore
@@ -359,6 +361,7 @@ def build_services() -> Services:
         transaction_repository=transaction_repository,
         command_service=remote_command_service,
     )
+    driver_reservation_service = DriverReservationService(ocpi_command_service)
     charging_preferences_service = ChargingPreferencesService(
         session_charger_map=session_charger_map,
         store=InMemoryChargingPreferencesStore(),
@@ -407,6 +410,7 @@ def build_services() -> Services:
         charging_profile_service=charging_profile_service,
         session_charger_map=session_charger_map,
         ocpi_command_service=ocpi_command_service,
+        driver_reservation_service=driver_reservation_service,
         charging_preferences_service=charging_preferences_service,
         reconciliation_store=reconciliation_store,
         price_list_store=price_list_store,

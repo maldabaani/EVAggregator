@@ -27,10 +27,15 @@ services:
 
   nats:
     image: nats:2.10-alpine
-    command: ["-js"]
+    command: ["-js", "-m", "8222"]
     ports:
       - "4222:4222"
       - "8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   migrate:
     build:
@@ -67,6 +72,8 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      nats:
+        condition: service_healthy
 
   backend-edge:
     build:
@@ -80,6 +87,8 @@ services:
       migrate:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      nats:
         condition: service_healthy
 
   # OAuth/PKCE token issuance (Task 6.3) plus, in app_mode=testing only, a

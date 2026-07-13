@@ -70,13 +70,13 @@
   }
 
   &--primary {
-    background: #2563eb;
-    color: white;
+    background: var(--color-primary);
+    color: var(--color-on-primary);
   }
 
   &--secondary {
-    background: white;
-    color: #374151;
-    border-color: #e5e7eb;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border-color: var(--color-border);
   }
 }

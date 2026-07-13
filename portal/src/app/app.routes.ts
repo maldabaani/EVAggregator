@@ -1,7 +1,11 @@
 import { Routes } from '@angular/router';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'partners' },
+  { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+  {
+    path: 'dashboard',
+    loadComponent: () => import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
+  },
   {
     path: 'partners',
     loadComponent: () =>
@@ -19,6 +23,11 @@ export const routes: Routes = [
     path: 'partners/:id',
     loadComponent: () =>
       import('./features/partners/partner-detail/partner-detail.component').then((m) => m.PartnerDetailComponent),
+  },
+  {
+    path: 'tariffs',
+    loadComponent: () =>
+      import('./features/tariffs/tariff-list/tariff-list.component').then((m) => m.TariffListComponent),
   },
   {
     path: 'tariffs/new',

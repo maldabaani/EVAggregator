@@ -1,0 +1,30 @@
+<div class="dashboard">
+  <header class="dashboard__header">
+    <h1>Operations Dashboard</h1>
+    <p class="dashboard__subtitle">Roaming, pricing, cost reporting, and charger commands in one place.</p>
+  </header>
+
+  <div class="dashboard__stats" *ngIf="partners$ | async as partners">
+    <div class="stat-card">
+      <span class="stat-card__value" data-testid="partner-count">{{ partners.length }}</span>
+      <span class="stat-card__label">Roaming partners</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__value" data-testid="connected-count">{{ connectedCount(partners) }}</span>
+      <span class="stat-card__label">Connected</span>
+    </div>
+  </div>
+
+  <div class="dashboard__panels">
+    <a
+      *ngFor="let panel of panels"
+      [routerLink]="panel.link"
+      class="panel-card"
+      [attr.data-testid]="'panel-' + panel.link"
+    >
+      <h2 class="panel-card__title">{{ panel.title }}</h2>
+      <p class="panel-card__description">{{ panel.description }}</p>
+      <span class="panel-card__link">{{ panel.linkLabel }} →</span>
+    </a>
+  </div>
+</div>

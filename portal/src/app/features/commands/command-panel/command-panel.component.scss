@@ -6,9 +6,9 @@
   --ink-3: #898781;
   --bd: rgba(11, 11, 11, 0.1);
   --grid: #e1e0d9;
-  --accent: #2a78d6;
-  --track: #cde2fb;
-  --wash: #eaf2fc;
+  --accent: var(--color-primary, #0ba37a);
+  --track: #bfe8da;
+  --wash: #e3f5ee;
   --warn-bg: #fff6e2;
   --warn-bd: #f2cb72;
   --warn-ink: #7a5300;

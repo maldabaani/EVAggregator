@@ -23,4 +23,12 @@ describe('AppComponent', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('main.app-shell')).toBeTruthy();
   });
+
+  it('renders a nav link for every main section', () => {
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const links = Array.from(compiled.querySelectorAll('.top-bar__link')).map((el) => el.textContent?.trim());
+    expect(links).toEqual(['Dashboard', 'Partners', 'Tariffs', 'Cost Reports', 'Commands']);
+  });
 });

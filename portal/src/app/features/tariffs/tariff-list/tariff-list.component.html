@@ -1,0 +1,43 @@
+<div class="tariff-list">
+  <header class="tariff-list__header">
+    <h1>Tariffs</h1>
+    <a routerLink="/tariffs/new" class="button button--primary" data-testid="new-tariff-link">New tariff</a>
+  </header>
+
+  <form [formGroup]="form" (ngSubmit)="load()" class="tariff-list__form">
+    <label>
+      Tenant ID
+      <input type="text" formControlName="tenantId" placeholder="tenant uuid" data-testid="tenant-id-input" />
+    </label>
+    <button type="submit" class="button button--secondary" [disabled]="form.invalid" data-testid="load-button">
+      Load tariffs
+    </button>
+  </form>
+
+  <p *ngIf="loadError" class="tariff-list__error" data-testid="load-error">{{ loadError }}</p>
+  <p *ngIf="loading" data-testid="loading-state">Loading tariffs…</p>
+
+  <ng-container *ngIf="tariffs as loaded">
+    <div *ngIf="loaded.length === 0; else table" class="tariff-list__empty" data-testid="empty-state">
+      <p>No tariffs for this tenant yet.</p>
+      <a routerLink="/tariffs/new" class="button button--primary">Create a tariff</a>
+    </div>
+
+    <ng-template #table>
+      <table class="tariff-list__table" data-testid="tariff-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Currency</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let tariff of loaded">
+            <td>{{ tariff.name }}</td>
+            <td>{{ tariff.currency }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </ng-template>
+  </ng-container>
+</div>

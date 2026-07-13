@@ -19,6 +19,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from evagg.billing.payment_method_router import build_payment_method_router
 from evagg.billing.stripe_webhook import build_stripe_webhook_router
@@ -116,5 +117,16 @@ app.include_router(build_command_router(_remote_command_service, _command_log_st
 
 app.add_middleware(TenantContextMiddleware)
 app.add_middleware(GatewaySignatureMiddleware)
+# Added last so it's outermost — a CORS preflight (OPTIONS, no tenant
+# header at all) must be answered before GatewaySignatureMiddleware/
+# TenantContextMiddleware ever run, or every cross-origin browser call
+# fails before it even reaches a route.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins_list,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 instrument_app(app, services.redis_client)

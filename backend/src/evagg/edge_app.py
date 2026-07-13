@@ -14,6 +14,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from evagg.composition import build_services, shutdown_services, startup_services
 from evagg.core.config import settings
@@ -46,6 +47,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="EV Charging Aggregator Platform Edge Services", version="0.1.0", lifespan=lifespan)
 register_ocpi_exception_handlers(app)
+# Browser-based clients (the mobile app's web build, e.g.) call this app
+# directly and cross-origin from whatever port their own dev server runs
+# on — without this, every request from a browser (not just POST bodies)
+# fails at the CORS preflight before it ever reaches a route.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins_list,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 async def _partner_registry():

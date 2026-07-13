@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     # not this dev-only reverse proxy).
     internal_services_base_url: str = "http://backend-main:8000"
 
+    # Browser-based clients (the mobile app's web build, the portal) call
+    # both `evagg.main` and `evagg.edge_app` directly and cross-origin from
+    # whatever port their own dev server runs on — comma-separated, or "*"
+    # to allow any origin (the default; fine for local/testing use, but a
+    # real production deployment should pin this to its actual web origins).
+    cors_allowed_origins: str = "*"
+
     rate_limit_requests_per_window: int = 100
     rate_limit_window_seconds: int = 60
 
@@ -120,6 +127,12 @@ class Settings(BaseSettings):
     persistence_backend: Literal["memory", "supabase"] = "memory"
     supabase_url: str = "https://project.supabase.co"
     supabase_api_key: str = "dev_only_replace_me"
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        if self.cors_allowed_origins == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 settings = Settings()

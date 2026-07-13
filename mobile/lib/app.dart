@@ -71,6 +71,7 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               onReserve: driverApi.reserveCharger,
               onCancelReservation: driverApi.cancelReservation,
               liveActivityController: _liveActivityController,
+              onFetchLiveSession: driverApi.getSessionLiveStatus,
             ),
             vehiclesScreen: VehicleListScreen(
               fetcher: driverApi.fetchVehicles,

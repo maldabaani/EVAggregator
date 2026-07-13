@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:evagg_driver/core/api/api_client.dart';
 import 'package:evagg_driver/core/api/driver_api.dart';
 import 'package:evagg_driver/core/models/charger_filter.dart';
+import 'package:evagg_driver/features/session/session_tracking.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -446,5 +447,62 @@ void main() {
 
     expect(plan.chargingStopNeeded, isFalse);
     expect(plan.suggestedCharger, isNull);
+  });
+
+  test('getSessionLiveStatus parses the live session snapshot', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/charging/session/session-1/live');
+          return http.Response(
+            jsonEncode({
+              'status': 'charging',
+              'energy_kwh': 4.2,
+              'power_kw': 7.5,
+              'cost_minor_units': 420,
+              'currency': 'AED',
+              'started_at': '2026-01-01T00:00:00.000Z',
+              'updated_at': '2026-01-01T00:05:00.000Z',
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final snapshot = await api.getSessionLiveStatus('session-1');
+
+    expect(snapshot.status, SessionStatus.charging);
+    expect(snapshot.energyKwh, 4.2);
+    expect(snapshot.powerKw, 7.5);
+    expect(snapshot.costMinorUnits, 420);
+    expect(snapshot.currency, 'AED');
+  });
+
+  test('getSessionLiveStatus maps an unrecognized status to charging', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          return http.Response(
+            jsonEncode({
+              'status': 'finished',
+              'energy_kwh': 10.0,
+              'power_kw': 0.0,
+              'cost_minor_units': 0,
+              'currency': 'AED',
+              'started_at': '2026-01-01T00:00:00.000Z',
+              'updated_at': '2026-01-01T00:05:00.000Z',
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final snapshot = await api.getSessionLiveStatus('session-1');
+
+    expect(snapshot.status, SessionStatus.finished);
   });
 }

@@ -4,6 +4,7 @@ import 'package:evagg_driver/core/models/reservation.dart';
 import 'package:evagg_driver/features/map/live_status_feed.dart';
 import 'package:evagg_driver/features/map/map_screen.dart';
 import 'package:evagg_driver/features/map/pin_clustering.dart';
+import 'package:evagg_driver/features/session/session_tracking.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' hide LatLngBounds;
 import 'package:flutter_test/flutter_test.dart';
@@ -333,6 +334,70 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(liveActivityController.endedSessionIds, ['session-1']);
+  });
+
+  testWidgets('View live session opens the live session screen for the started session', (tester) async {
+    String? fetchedSessionId;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async => const StartChargingResult(sessionId: 'session-1'),
+          onStopCharging: (sessionId) async {},
+          onFetchLiveSession: (sessionId) async {
+            fetchedSessionId = sessionId;
+            return SessionSnapshot(
+              status: SessionStatus.charging,
+              energyKwh: 4.2,
+              powerKw: 7.5,
+              costMinorUnits: 420,
+              currency: 'AED',
+              startedAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('view-live-session-button')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('view-live-session-button')));
+    await tester.pumpAndSettle();
+
+    expect(fetchedSessionId, 'session-1');
+    expect(find.byKey(const Key('energy-value')), findsOneWidget);
+    expect(find.text('4.20 kWh'), findsOneWidget);
+  });
+
+  testWidgets('no View live session button appears when onFetchLiveSession is not provided', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async => const StartChargingResult(sessionId: 'session-1'),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('view-live-session-button')), findsNothing);
   });
 
   testWidgets('no Stop Charging button appears when onStopCharging is not provided', (tester) async {

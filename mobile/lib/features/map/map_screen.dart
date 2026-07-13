@@ -8,6 +8,8 @@ import 'package:latlong2/latlong.dart' as ll;
 import '../../core/live_activity/live_activity_controller.dart';
 import '../../core/models/charger_filter.dart';
 import '../../core/models/reservation.dart';
+import '../session/live_session_screen.dart';
+import '../session/session_tracking.dart';
 import 'live_status_feed.dart';
 import 'pin_clustering.dart';
 import 'search_debouncer.dart';
@@ -28,6 +30,7 @@ class StartChargingResult {
 
 typedef StartChargingHandler = Future<StartChargingResult> Function(String chargerId, int connectorId);
 typedef StopChargingHandler = Future<void> Function(String sessionId);
+typedef LiveSessionFetcher = Future<SessionSnapshot> Function(String sessionId);
 typedef ReserveHandler = Future<Reservation> Function(String chargerId, int connectorId, DateTime expiresAt);
 typedef CancelReservationHandler = Future<void> Function(String reservationId);
 
@@ -45,6 +48,7 @@ class MapScreen extends StatefulWidget {
   final ReserveHandler? onReserve;
   final CancelReservationHandler? onCancelReservation;
   final LiveActivityController liveActivityController;
+  final LiveSessionFetcher? onFetchLiveSession;
 
   const MapScreen({
     super.key,
@@ -57,6 +61,7 @@ class MapScreen extends StatefulWidget {
     this.onReserve,
     this.onCancelReservation,
     this.liveActivityController = const NoopLiveActivityController(),
+    this.onFetchLiveSession,
   });
 
   @override
@@ -136,6 +141,7 @@ class _MapScreenState extends State<MapScreen> {
           onReserve: widget.onReserve,
           onCancelReservation: widget.onCancelReservation,
           liveActivityController: widget.liveActivityController,
+          onFetchLiveSession: widget.onFetchLiveSession,
         ),
       ),
     );
@@ -251,6 +257,7 @@ class _StationDetailSheet extends StatefulWidget {
   final ReserveHandler? onReserve;
   final CancelReservationHandler? onCancelReservation;
   final LiveActivityController liveActivityController;
+  final LiveSessionFetcher? onFetchLiveSession;
 
   const _StationDetailSheet({
     required this.chargerId,
@@ -259,6 +266,7 @@ class _StationDetailSheet extends StatefulWidget {
     this.onReserve,
     this.onCancelReservation,
     this.liveActivityController = const NoopLiveActivityController(),
+    this.onFetchLiveSession,
   });
 
   @override
@@ -384,6 +392,19 @@ class _StationDetailSheetState extends State<_StationDetailSheet> {
                     style: const TextStyle(color: Colors.red),
                   ),
                 ),
+              if (widget.onFetchLiveSession != null) ...[
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  key: const Key('view-live-session-button'),
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => LiveSessionScreen(
+                      sessionFetcher: () => widget.onFetchLiveSession!(_startedSessionId!),
+                      sessionStopper: () => widget.onStopCharging!(_startedSessionId!),
+                    ),
+                  )),
+                  child: const Text('View live session'),
+                ),
+              ],
               if (widget.onStopCharging != null) ...[
                 const SizedBox(height: 12),
                 ElevatedButton(

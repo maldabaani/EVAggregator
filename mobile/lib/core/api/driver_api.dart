@@ -7,6 +7,7 @@ import '../models/vehicle.dart';
 import '../../features/map/map_query.dart';
 import '../../features/map/map_screen.dart' show StartChargingResult;
 import '../../features/map/pin_clustering.dart';
+import '../../features/session/session_tracking.dart';
 import 'api_client.dart';
 
 /// Covers the whole planet — used only for the location-name search below,
@@ -102,6 +103,22 @@ class DriverApi {
 
   Future<void> stopCharging(String sessionId) async {
     await client.post('/charging/session/$sessionId/stop');
+  }
+
+  Future<SessionSnapshot> getSessionLiveStatus(String sessionId) async {
+    final response = await client.get('/charging/session/$sessionId/live') as Map<String, dynamic>;
+    return SessionSnapshot(
+      status: SessionStatus.values.firstWhere(
+        (s) => s.name == response['status'],
+        orElse: () => SessionStatus.charging,
+      ),
+      energyKwh: (response['energy_kwh'] as num).toDouble(),
+      powerKw: (response['power_kw'] as num).toDouble(),
+      costMinorUnits: response['cost_minor_units'] as int,
+      currency: response['currency'] as String,
+      startedAt: DateTime.parse(response['started_at'] as String),
+      updatedAt: DateTime.parse(response['updated_at'] as String),
+    );
   }
 
   Future<int> getWalletBalance() async {

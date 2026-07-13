@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from evagg.billing.payment_method_router import build_payment_method_router
 from evagg.billing.stripe_webhook import build_stripe_webhook_router
 from evagg.billing.tariff_router import build_tariff_router
 from evagg.billing.wallet_router import build_wallet_router
@@ -58,6 +59,10 @@ async def _wallet_service():
     return services.wallet_service
 
 
+async def _payment_method_store():
+    return services.payment_method_store
+
+
 async def _carbon_service():
     return services.carbon_service
 
@@ -92,6 +97,7 @@ async def _command_log_store():
 
 app.include_router(build_tariff_router(_tariff_service))
 app.include_router(build_wallet_router(_wallet_service))
+app.include_router(build_payment_method_router(_payment_method_store))
 app.include_router(build_stripe_webhook_router(_wallet_service, settings.stripe_webhook_secret))
 app.include_router(build_carbon_router(_carbon_service))
 app.include_router(build_cost_report_router(_cost_report_service))

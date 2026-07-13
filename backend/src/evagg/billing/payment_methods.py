@@ -27,6 +27,8 @@ class PaymentMethod:
 class PaymentMethodStore(Protocol):
     async def get_default(self, wallet_id: uuid.UUID) -> PaymentMethod | None: ...
 
+    async def set_default(self, wallet_id: uuid.UUID, method_type: str, psp_token: str | None) -> PaymentMethod: ...
+
 
 class InMemoryPaymentMethodStore:
     def __init__(self) -> None:
@@ -38,3 +40,8 @@ class InMemoryPaymentMethodStore:
 
     async def get_default(self, wallet_id: uuid.UUID) -> PaymentMethod | None:
         return self._methods.get(wallet_id)
+
+    async def set_default(self, wallet_id: uuid.UUID, method_type: str, psp_token: str | None) -> PaymentMethod:
+        method = PaymentMethod(id=uuid.uuid4(), wallet_id=wallet_id, type=method_type, psp_token=psp_token, is_default=True)
+        self._methods[wallet_id] = method
+        return method

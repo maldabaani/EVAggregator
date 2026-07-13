@@ -44,7 +44,7 @@ from typing import Any
 
 import redis.asyncio as redis_asyncio
 
-from evagg.billing.payment_methods import InMemoryPaymentMethodStore
+from evagg.billing.payment_methods import InMemoryPaymentMethodStore, PaymentMethodStore
 from evagg.billing.payment_provider import PaymentProvider, StripePaymentProvider, StubPaymentProvider
 from evagg.billing.tariffs import InMemoryTariffStore, InMemoryTenantCurrencyProvider, TariffService
 from evagg.billing.wallet import InMemoryWalletLedgerStore, WalletService
@@ -155,6 +155,7 @@ class Services:
 
     tariff_service: TariffService
     wallet_service: WalletService
+    payment_method_store: PaymentMethodStore
     carbon_service: CarbonIntensityService
     cost_report_service: CostReportService
     session_start_service: SessionStartService
@@ -252,6 +253,7 @@ def build_services() -> Services:
     else:
         tariff_service = TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider())
         wallet_service = WalletService(InMemoryWalletLedgerStore(), _build_payment_provider())
+    payment_method_store: PaymentMethodStore = InMemoryPaymentMethodStore()
 
     # --- Carbon --------------------------------------------------------
     zone_map = InMemoryCarbonZoneMap()
@@ -362,7 +364,7 @@ def build_services() -> Services:
         store=InMemoryChargingPreferencesStore(),
     )
     session_start_service = SessionStartService(
-        payment_method_store=InMemoryPaymentMethodStore(),
+        payment_method_store=payment_method_store,
         # No driver->wallet mapping table exists yet (see module docstring on
         # persistence); identity mapping is a testing-mode simplification.
         wallet_id_for_driver=lambda driver_id: driver_id,
@@ -393,6 +395,7 @@ def build_services() -> Services:
     return Services(
         tariff_service=tariff_service,
         wallet_service=wallet_service,
+        payment_method_store=payment_method_store,
         carbon_service=carbon_service,
         cost_report_service=cost_report_service,
         session_start_service=session_start_service,

@@ -5,10 +5,12 @@ import 'core/api/api_client.dart';
 import 'core/api/driver_api.dart';
 import 'core/auth/auth_session.dart';
 import 'core/live_activity/live_activity_controller.dart';
+import 'core/navigation/tab_switcher.dart';
 import 'core/theme/app_theme.dart';
 import 'features/account/account_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
+import 'features/home/home_screen.dart';
 import 'features/map/map_screen.dart';
 import 'features/route_planner/route_planner_screen.dart';
 import 'features/vehicles/vehicle_list_screen.dart';
@@ -30,6 +32,7 @@ class EvAggregatorApp extends StatefulWidget {
 class _EvAggregatorAppState extends State<EvAggregatorApp> {
   bool _showSignup = false;
   final IosLiveActivityController _liveActivityController = IosLiveActivityController();
+  final TabSwitcher _tabSwitcher = TabSwitcher();
 
   @override
   void initState() {
@@ -42,6 +45,7 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'EV Aggregator',
+      debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       home: AnimatedBuilder(
         animation: widget.authSession,
@@ -64,6 +68,17 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
           }
           final driverApi = DriverApi(widget.apiClient);
           return AppShell(
+            tabSwitcher: _tabSwitcher,
+            homeScreen: HomeScreen(
+              fetchVehicles: driverApi.fetchVehicles,
+              fetchWalletBalance: driverApi.getWalletBalance,
+              fetchUsageInsights: driverApi.getUsageInsights,
+              fetchReservations: driverApi.fetchReservations,
+              fetchRewards: driverApi.getRewards,
+              onOpenMap: () => _tabSwitcher.switchTo(1),
+              onOpenVehicles: () => _tabSwitcher.switchTo(2),
+              onOpenWallet: () => _tabSwitcher.switchTo(3),
+            ),
             mapScreen: MapScreen(
               searchExecutor: driverApi.searchStations,
               pinsFetcher: driverApi.fetchChargers,

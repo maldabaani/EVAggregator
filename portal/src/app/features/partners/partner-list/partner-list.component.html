@@ -1,6 +1,7 @@
 <div class="partner-list">
   <header class="partner-list__header">
     <h1>Roaming Partners</h1>
+    <a routerLink="/partners/new" class="button button--primary" data-testid="new-partner-link">New partner</a>
   </header>
 
   <ng-container *ngIf="partners$ | async as partners; else loading">

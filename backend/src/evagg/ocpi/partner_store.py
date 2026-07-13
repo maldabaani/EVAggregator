@@ -38,6 +38,13 @@ class PartnerRegistry(Protocol):
 
     async def list_all(self) -> list[Partner]: ...
 
+    async def create(self, tenant_id: uuid.UUID, party_id: str, country_code: str, token_a: str) -> Partner:
+        """Onboards a new roaming partner: `status='pending'` until they
+        complete the credentials handshake (`negotiate_credentials`) using
+        `token_a`, which the operator shares with the partner out-of-band —
+        this call is the only place it's ever visible in plaintext."""
+        ...
+
 
 class InMemoryPartnerRegistry:
     def __init__(self, partners: list[Partner] | None = None) -> None:
@@ -45,6 +52,20 @@ class InMemoryPartnerRegistry:
 
     def add(self, partner: Partner) -> None:
         self._partners[partner.id] = partner
+
+    async def create(self, tenant_id: uuid.UUID, party_id: str, country_code: str, token_a: str) -> Partner:
+        partner = Partner(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            party_id=party_id,
+            country_code=country_code,
+            token_a=token_a,
+            token_c=None,
+            negotiated_version=None,
+            status="pending",
+        )
+        self._partners[partner.id] = partner
+        return partner
 
     async def find_by_token_a(self, token: str) -> Partner | None:
         return next((p for p in self._partners.values() if p.token_a == token), None)

@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap, SessionChargerBinding
 from evagg.ocpi.partner_admin import (
+    PartnerPriceList,
+    PriceListStore,
     export_reconciliation_csv,
     filter_reconciliation_entries,
     rotate_token_a,
@@ -24,6 +26,18 @@ class SessionBindingRequest(BaseModel):
     charger_id: str
     tenant_id: uuid.UUID
     connector_id: int
+
+
+class CreatePartnerRequest(BaseModel):
+    tenant_id: uuid.UUID
+    party_id: str
+    country_code: str
+
+
+class AttachPriceListRequest(BaseModel):
+    connector_type: str
+    tariff_id: uuid.UUID
+    effective_from: datetime
 
 
 def _partner_to_dict(partner: Partner) -> dict:
@@ -38,7 +52,10 @@ def _partner_to_dict(partner: Partner) -> dict:
 
 
 def build_admin_router(
-    partner_registry_dependency, reconciliation_store_dependency, session_charger_map_dependency
+    partner_registry_dependency,
+    reconciliation_store_dependency,
+    session_charger_map_dependency,
+    price_list_store_dependency,
 ) -> APIRouter:
     router = APIRouter(prefix="/admin/ocpi", tags=["ocpi-admin"])
 
@@ -47,6 +64,19 @@ def build_admin_router(
         partners = await registry.list_all()
         return {"data": [_partner_to_dict(p) for p in partners]}
 
+    @router.post("/partners")
+    async def create_partner(
+        body: CreatePartnerRequest, registry: PartnerRegistry = Depends(partner_registry_dependency)
+    ) -> dict:
+        # token_a is generated here, not inside the store, matching
+        # rotate_token's existing split (crypto concerns live at the route,
+        # persistence at the store) — returned once so the operator can
+        # copy it to share with the partner out-of-band; no later read of
+        # this partner ever exposes it again.
+        token_a = secrets.token_urlsafe(24)
+        partner = await registry.create(body.tenant_id, body.party_id, body.country_code, token_a)
+        return _partner_to_dict(partner) | {"token_a": token_a}
+
     @router.post("/partners/{partner_id}/rotate-token")
     async def rotate_token(
         partner_id: uuid.UUID, registry: PartnerRegistry = Depends(partner_registry_dependency)
@@ -54,6 +84,26 @@ def build_admin_router(
         new_token = secrets.token_urlsafe(24)
         await rotate_token_a(registry, partner_id, new_token)
         return {"token_a": new_token}
+
+    @router.post("/partners/{partner_id}/price-lists")
+    async def attach_price_list(
+        partner_id: uuid.UUID,
+        body: AttachPriceListRequest,
+        store: PriceListStore = Depends(price_list_store_dependency),
+    ) -> dict:
+        price_list = PartnerPriceList(
+            partner_id=partner_id,
+            connector_type=body.connector_type,
+            tariff_id=body.tariff_id,
+            effective_from=body.effective_from,
+        )
+        await store.attach(price_list)
+        return {
+            "partner_id": str(partner_id),
+            "connector_type": body.connector_type,
+            "tariff_id": str(body.tariff_id),
+            "effective_from": body.effective_from.isoformat(),
+        }
 
     @router.get("/reconciliation")
     async def reconciliation(

@@ -74,7 +74,7 @@ from evagg.ocpi.charging_profiles import (
 from evagg.ocpi.commands import OcpiCommandService
 from evagg.ocpi.location_sync import HttpPartnerPushClient, InMemoryPartnerPushClient, PartnerPushClient
 from evagg.ocpi.locations import InMemoryLocationRepository
-from evagg.ocpi.partner_admin import InMemoryReconciliationResultStore
+from evagg.ocpi.partner_admin import InMemoryPriceListStore, InMemoryReconciliationResultStore, PriceListStore
 from evagg.ocpi.partner_store import InMemoryPartnerRegistry
 from evagg.ocpi.session_sync import HttpSessionPushClient, InMemorySessionPushClient, SessionPushClient
 from evagg.ocpi.tariff_bridge import OcpiTariffCatalog
@@ -166,6 +166,7 @@ class Services:
     ocpi_command_service: OcpiCommandService
     charging_preferences_service: ChargingPreferencesService
     reconciliation_store: InMemoryReconciliationResultStore
+    price_list_store: PriceListStore
     partner_push_client: PartnerPushClient
     session_push_client: SessionPushClient
 
@@ -273,6 +274,7 @@ def build_services() -> Services:
     location_repository = InMemoryLocationRepository()
     partner_registry = InMemoryPartnerRegistry()
     reconciliation_store = InMemoryReconciliationResultStore()
+    price_list_store: PriceListStore = InMemoryPriceListStore()
     tariff_catalog = OcpiTariffCatalog(tariff_service, settings.ocpi_party_id, settings.ocpi_country_code)
     # Constructed but not yet wired to live event-bus consumption — see
     # module docstring's "what app_mode doesn't control" for location_sync/
@@ -387,6 +389,7 @@ def build_services() -> Services:
         ocpi_command_service=ocpi_command_service,
         charging_preferences_service=charging_preferences_service,
         reconciliation_store=reconciliation_store,
+        price_list_store=price_list_store,
         partner_push_client=partner_push_client,
         session_push_client=session_push_client,
         presence_registry=presence_registry,

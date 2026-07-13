@@ -62,4 +62,25 @@ describe('PartnerListComponent', () => {
     expect(compiled.querySelector('[data-testid="empty-state"]')).toBeFalsy();
     expect(compiled.textContent).toContain('ABC');
   });
+
+  it('shows a "New partner" link in the header even when partners already exist', () => {
+    const partners: Partner[] = [
+      {
+        id: 'p-1',
+        party_id: 'ABC',
+        country_code: 'AE',
+        negotiated_version: '2.2.1',
+        status: 'connected',
+        last_handshake_at: '2026-07-01T00:00:00Z',
+      },
+    ];
+
+    fixture.detectChanges();
+    httpMock.expectOne('/admin/ocpi/partners').flush({ data: partners });
+    fixture.detectChanges();
+
+    const link = fixture.nativeElement.querySelector('[data-testid="new-partner-link"]');
+    expect(link).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/partners/new');
+  });
 });

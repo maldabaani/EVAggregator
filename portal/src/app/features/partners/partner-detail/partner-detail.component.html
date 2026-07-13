@@ -15,6 +15,7 @@
     <h2>Credentials</h2>
     <button type="button" (click)="rotateToken()" data-testid="rotate-token-button">Rotate token</button>
     <p *ngIf="rotatedToken" data-testid="rotated-token">New token_a: {{ rotatedToken }}</p>
+    <p *ngIf="rotateTokenError" class="error-text" data-testid="rotate-token-error">{{ rotateTokenError }}</p>
   </section>
 
   <section *ngIf="activeTab === 'price-lists'" data-testid="panel-price-lists">
@@ -38,6 +39,8 @@
       </label>
       <button type="submit" data-testid="attach-price-list-button">Attach</button>
     </form>
+    <p *ngIf="priceListSaved" class="success-text" data-testid="price-list-saved">Price list attached.</p>
+    <p *ngIf="priceListError" class="error-text" data-testid="price-list-error">{{ priceListError }}</p>
   </section>
 
   <section *ngIf="activeTab === 'reconciliation'" data-testid="panel-reconciliation">
@@ -52,7 +55,11 @@
       </select>
     </label>
     <a [href]="exportUrl" data-testid="export-csv-link">Export CSV</a>
-    <table data-testid="reconciliation-table">
+    <p *ngIf="reconciliationError" class="error-text" data-testid="reconciliation-error">{{ reconciliationError }}</p>
+    <p *ngIf="!reconciliationError && reconciliationEntries.length === 0" class="muted-text" data-testid="reconciliation-empty">
+      No reconciliation results yet.
+    </p>
+    <table *ngIf="reconciliationEntries.length > 0" data-testid="reconciliation-table">
       <thead>
         <tr>
           <th>Local CDR</th>

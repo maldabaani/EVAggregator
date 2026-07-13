@@ -19,14 +19,18 @@ export class PartnerDetailComponent implements OnInit {
   partnerId = '';
   activeTab: TabId = 'credentials';
   rotatedToken: string | null = null;
+  rotateTokenError: string | null = null;
   reconciliationEntries: ReconciliationEntry[] = [];
   reconciliationStatusFilter = '';
+  reconciliationError: string | null = null;
 
   priceListForm = {
     connectorType: 'CCS2',
     tariffId: '',
     effectiveFrom: '',
   };
+  priceListSaved = false;
+  priceListError: string | null = null;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -43,26 +47,36 @@ export class PartnerDetailComponent implements OnInit {
   }
 
   rotateToken(): void {
-    this.partnerApi.rotateToken(this.partnerId).subscribe((response) => {
-      this.rotatedToken = response.token_a;
+    this.rotateTokenError = null;
+    this.partnerApi.rotateToken(this.partnerId).subscribe({
+      next: (response) => (this.rotatedToken = response.token_a),
+      error: () => (this.rotateTokenError = `Could not rotate the token for partner "${this.partnerId}".`),
     });
   }
 
   attachPriceList(): void {
+    this.priceListError = null;
+    this.priceListSaved = false;
     this.partnerApi
       .attachPriceList(this.partnerId, {
         connectorType: this.priceListForm.connectorType,
         tariffId: this.priceListForm.tariffId,
         effectiveFrom: this.priceListForm.effectiveFrom,
       })
-      .subscribe(() => {
-        this.priceListForm = { connectorType: 'CCS2', tariffId: '', effectiveFrom: '' };
+      .subscribe({
+        next: () => {
+          this.priceListForm = { connectorType: 'CCS2', tariffId: '', effectiveFrom: '' };
+          this.priceListSaved = true;
+        },
+        error: () => (this.priceListError = 'Could not attach the price list. Check the tariff ID and try again.'),
       });
   }
 
   loadReconciliation(): void {
-    this.partnerApi.getReconciliation(this.reconciliationStatusFilter || undefined).subscribe((entries) => {
-      this.reconciliationEntries = entries;
+    this.reconciliationError = null;
+    this.partnerApi.getReconciliation(this.reconciliationStatusFilter || undefined).subscribe({
+      next: (entries) => (this.reconciliationEntries = entries),
+      error: () => (this.reconciliationError = 'Could not load reconciliation results.'),
     });
   }
 

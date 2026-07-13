@@ -23,6 +23,21 @@ form label {
   margin-bottom: 0.75rem;
 }
 
+.error-text {
+  color: #991b1b;
+  font-size: 0.875rem;
+}
+
+.success-text {
+  color: #166534;
+  font-size: 0.875rem;
+}
+
+.muted-text {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

@@ -1,0 +1,53 @@
+<div class="partner-create">
+  <header class="partner-create__header">
+    <h1>Connect a roaming partner</h1>
+    <p class="partner-create__subtitle">
+      Creates a pending partner record and a one-time token_a — share it with the partner
+      out-of-band so they can complete the OCPI credentials handshake.
+    </p>
+  </header>
+
+  <form
+    *ngIf="!created"
+    class="partner-create__form"
+    [formGroup]="form"
+    (ngSubmit)="save()"
+    data-testid="partner-create-form"
+  >
+    <label>
+      Tenant ID
+      <input formControlName="tenantId" placeholder="Your tenant UUID" data-testid="tenant-id-input" />
+    </label>
+    <label>
+      Party ID
+      <input formControlName="partyId" placeholder="e.g. ABC" maxlength="3" data-testid="party-id-input" />
+    </label>
+    <label>
+      Country code
+      <input formControlName="countryCode" placeholder="e.g. AE" maxlength="2" data-testid="country-code-input" />
+    </label>
+
+    <p *ngIf="saveError" class="partner-create__error" data-testid="save-error">{{ saveError }}</p>
+
+    <div class="partner-create__actions">
+      <button type="submit" class="button button--primary" [disabled]="saving" data-testid="create-partner-button">
+        {{ saving ? 'Creating…' : 'Create partner' }}
+      </button>
+      <a routerLink="/partners" class="button button--secondary">Cancel</a>
+    </div>
+  </form>
+
+  <section *ngIf="created" class="partner-create__success" data-testid="partner-created-panel">
+    <h2>Partner created</h2>
+    <p>
+      Share this token with <strong>{{ created.party_id }}</strong> so they can complete the credentials
+      handshake. It will not be shown again — rotate it from the partner's Credentials tab if it's lost.
+    </p>
+    <code class="partner-create__token" data-testid="created-token-a">{{ created.token_a }}</code>
+    <div class="partner-create__actions">
+      <button type="button" class="button button--primary" (click)="goToPartner()" data-testid="go-to-partner-button">
+        Go to partner
+      </button>
+    </div>
+  </section>
+</div>

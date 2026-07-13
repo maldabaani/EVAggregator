@@ -8,6 +8,14 @@ export const routes: Routes = [
       import('./features/partners/partner-list/partner-list.component').then((m) => m.PartnerListComponent),
   },
   {
+    // Must come before 'partners/:id' — route matching is order-sensitive,
+    // and :id would otherwise swallow the literal segment 'new' as if it
+    // were a partner id.
+    path: 'partners/new',
+    loadComponent: () =>
+      import('./features/partners/partner-create/partner-create.component').then((m) => m.PartnerCreateComponent),
+  },
+  {
     path: 'partners/:id',
     loadComponent: () =>
       import('./features/partners/partner-detail/partner-detail.component').then((m) => m.PartnerDetailComponent),

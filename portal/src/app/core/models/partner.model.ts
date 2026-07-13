@@ -7,6 +7,11 @@ export interface Partner {
   last_handshake_at: string | null;
 }
 
+/** Only returned once, by createPartner — no later read ever exposes token_a again. */
+export interface CreatedPartner extends Partner {
+  token_a: string;
+}
+
 export interface ReconciliationEntry {
   local_cdr_id: string | null;
   partner_cdr_uid: string;

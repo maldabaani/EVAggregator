@@ -68,13 +68,19 @@ async def _charging_preferences_service():
     return services.charging_preferences_service
 
 
+async def _price_list_store():
+    return services.price_list_store
+
+
 app.include_router(
     build_ocpi_router(
         _partner_registry, _location_repository, _tariff_catalog, _charging_profile_service, _ocpi_command_service,
         _charging_preferences_service,
     )
 )
-app.include_router(build_admin_router(_partner_registry, _reconciliation_store, _session_charger_map))
+app.include_router(
+    build_admin_router(_partner_registry, _reconciliation_store, _session_charger_map, _price_list_store)
+)
 app.include_router(
     build_ocpp_ws_router(services.connection_manager, services.message_handlers, services.live_connections)
 )

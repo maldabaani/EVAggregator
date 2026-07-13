@@ -144,4 +144,106 @@ void main() {
     expect(find.byKey(const Key('charger-detail-sheet')), findsOneWidget);
     expect(find.text('CP-002'), findsOneWidget);
   });
+
+  testWidgets('the detail sheet has no Start Charging button when onStartCharging is not provided', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('start-charging-button')), findsNothing);
+  });
+
+  testWidgets('tapping Start Charging calls onStartCharging and shows the session id on success', (tester) async {
+    String? capturedChargerId;
+    int? capturedConnectorId;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async {
+            capturedChargerId = chargerId;
+            capturedConnectorId = connectorId;
+            return const StartChargingResult(sessionId: 'session-1');
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(capturedChargerId, 'CP-002');
+    expect(capturedConnectorId, 1);
+    expect(find.byKey(const Key('start-charging-success')), findsOneWidget);
+    expect(find.textContaining('session-1'), findsOneWidget);
+  });
+
+  testWidgets('a failed start shows an inline error and leaves the button usable again', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async => throw Exception('offline'),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('start-charging-error')), findsOneWidget);
+    final button = tester.widget<ElevatedButton>(find.byKey(const Key('start-charging-button')));
+    expect(button.onPressed, isNotNull);
+  });
+
+  testWidgets('changing the connector dropdown is reflected in the next Start Charging call', (tester) async {
+    int? capturedConnectorId;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async {
+            capturedConnectorId = connectorId;
+            return const StartChargingResult(sessionId: 'session-1');
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('connector-id-dropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('2').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(capturedConnectorId, 2);
+  });
 }

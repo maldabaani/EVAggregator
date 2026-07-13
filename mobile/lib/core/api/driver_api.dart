@@ -1,6 +1,7 @@
 import '../models/charger_filter.dart';
 import '../models/vehicle.dart';
 import '../../features/map/map_query.dart';
+import '../../features/map/map_screen.dart' show StartChargingResult;
 import '../../features/map/pin_clustering.dart';
 import 'api_client.dart';
 
@@ -81,5 +82,17 @@ class DriverApi {
 
   Future<void> deleteVehicle(String vehicleId) async {
     await client.delete('/driver/vehicles/$vehicleId');
+  }
+
+  /// `driver_id` is required by the request shape but always overwritten
+  /// server-side (see evagg.driver_app.session_start_forwarder) with the
+  /// identity from this call's own bearer token, so it's sent empty here.
+  Future<StartChargingResult> startCharging(String chargerId, int connectorId) async {
+    final response = await client.post(
+      '/charging/session/start/app',
+      body: {'charger_id': chargerId, 'connector_id': connectorId, 'driver_id': ''},
+    );
+    final map = response as Map<String, dynamic>;
+    return StartChargingResult(sessionId: map['session_id'] as String);
   }
 }

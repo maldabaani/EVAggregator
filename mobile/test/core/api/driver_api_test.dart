@@ -124,6 +124,29 @@ void main() {
     expect(capturedMethod, 'PATCH');
   });
 
+  test('startCharging posts charger/connector and parses the session id', () async {
+    late Map<String, dynamic> capturedBody;
+    late String capturedPath;
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        accessToken: 'token-1',
+        httpClient: MockClient((request) async {
+          capturedPath = request.url.path;
+          capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(jsonEncode({'session_id': 'session-1', 'charger_id': 'CP-1'}), 200);
+        }),
+      ),
+    );
+
+    final result = await api.startCharging('CP-1', 2);
+
+    expect(capturedPath, '/charging/session/start/app');
+    expect(capturedBody['charger_id'], 'CP-1');
+    expect(capturedBody['connector_id'], 2);
+    expect(result.sessionId, 'session-1');
+  });
+
   test('deleteVehicle sends a DELETE to the vehicle path', () async {
     late String capturedMethod;
     final api = DriverApi(

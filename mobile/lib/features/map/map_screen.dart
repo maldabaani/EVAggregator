@@ -18,6 +18,14 @@ import 'search_debouncer.dart';
 /// wired to real markers instead of a placeholder.
 typedef PinsFetcher = Future<List<MapPin>> Function(LatLngBounds bbox, ChargerFilter filter);
 
+class StartChargingResult {
+  final String sessionId;
+
+  const StartChargingResult({required this.sessionId});
+}
+
+typedef StartChargingHandler = Future<StartChargingResult> Function(String chargerId, int connectorId);
+
 const ll.LatLng defaultMapCenter = ll.LatLng(25.2048, 55.2708); // Dubai
 const LatLngBounds defaultMapBounds = LatLngBounds(minLat: 25.05, minLng: 55.10, maxLat: 25.35, maxLng: 55.45);
 const double defaultInitialZoom = 13;
@@ -27,6 +35,7 @@ class MapScreen extends StatefulWidget {
   final PinsFetcher pinsFetcher;
   final LiveStatusFeedController? statusFeed;
   final TileProvider? tileProvider;
+  final StartChargingHandler? onStartCharging;
 
   const MapScreen({
     super.key,
@@ -34,6 +43,7 @@ class MapScreen extends StatefulWidget {
     required this.pinsFetcher,
     this.statusFeed,
     this.tileProvider,
+    this.onStartCharging,
   });
 
   @override
@@ -105,9 +115,10 @@ class _MapScreenState extends State<MapScreen> {
     showModalBottomSheet<void>(
       context: context,
       builder: (context) => SafeArea(
-        child: ListTile(
-          key: const Key('charger-detail-sheet'),
-          title: Text(cluster.pins.first.id),
+        key: const Key('charger-detail-sheet'),
+        child: _StationDetailSheet(
+          chargerId: cluster.pins.first.id,
+          onStartCharging: widget.onStartCharging,
         ),
       ),
     );
@@ -205,6 +216,98 @@ class _PinMarker extends StatelessWidget {
       child: count > 1
           ? Text('$count', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
           : const Icon(Icons.ev_station, color: Colors.white, size: 20),
+    );
+  }
+}
+
+/// The charger-detail bottom sheet's "Start Charging" section. Only shown
+/// when a handler is injected — the map screen is reused in places (or in
+/// tests) with no session-start capability at all.
+class _StationDetailSheet extends StatefulWidget {
+  final String chargerId;
+  final StartChargingHandler? onStartCharging;
+
+  const _StationDetailSheet({required this.chargerId, this.onStartCharging});
+
+  @override
+  State<_StationDetailSheet> createState() => _StationDetailSheetState();
+}
+
+class _StationDetailSheetState extends State<_StationDetailSheet> {
+  int _connectorId = 1;
+  bool _starting = false;
+  String? _error;
+  String? _startedSessionId;
+
+  Future<void> _start() async {
+    setState(() {
+      _starting = true;
+      _error = null;
+    });
+    try {
+      final result = await widget.onStartCharging!(widget.chargerId, _connectorId);
+      if (!mounted) return;
+      setState(() => _startedSessionId = result.sessionId);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not start charging. Please try again.');
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.chargerId, style: Theme.of(context).textTheme.titleMedium),
+          if (widget.onStartCharging != null) ...[
+            const SizedBox(height: 16),
+            if (_startedSessionId != null)
+              Text(
+                'Charging started (session ${_startedSessionId!}).',
+                key: const Key('start-charging-success'),
+              )
+            else ...[
+              Row(
+                children: [
+                  const Text('Connector'),
+                  const SizedBox(width: 12),
+                  DropdownButton<int>(
+                    key: const Key('connector-id-dropdown'),
+                    value: _connectorId,
+                    items: const [1, 2, 3]
+                        .map((connector) => DropdownMenuItem(value: connector, child: Text('$connector')))
+                        .toList(),
+                    onChanged: (value) => setState(() => _connectorId = value ?? 1),
+                  ),
+                ],
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _error!,
+                    key: const Key('start-charging-error'),
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                key: const Key('start-charging-button'),
+                onPressed: _starting ? null : _start,
+                child: _starting
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Start Charging'),
+              ),
+            ],
+          ],
+        ],
+      ),
     );
   }
 }

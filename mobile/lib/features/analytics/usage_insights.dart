@@ -1,8 +1,8 @@
-/// Task 5.4 — driver analytics & insights dashboard. Mirrors the shape of
-/// the backend's per-driver rollup (`DailyUsageRollup`, Task 4.4's
-/// `team_driver_daily_usage` table) rather than reprocessing raw sessions
-/// on-device: one pre-aggregated point per day, summarized here into the
-/// numbers the dashboard actually shows.
+/// Task 5.4 — driver analytics & insights dashboard. One point per day
+/// with a session, grouped from the driver's own completed-session
+/// history (`GET /driver/usage-insights`) rather than reprocessing raw
+/// sessions on-device — the backend does the grouping, this just
+/// summarizes the result into the numbers the dashboard shows.
 library;
 
 class DailyUsagePoint {
@@ -19,6 +19,14 @@ class DailyUsagePoint {
     required this.costTotalMinorUnits,
     this.topSiteName,
   });
+
+  factory DailyUsagePoint.fromJson(Map<String, dynamic> json) => DailyUsagePoint(
+        date: DateTime.parse(json['usage_date'] as String),
+        sessionCount: json['session_count'] as int,
+        kwhTotal: (json['kwh_total'] as num).toDouble(),
+        costTotalMinorUnits: json['cost_total_minor_units'] as int,
+        topSiteName: json['top_site_name'] as String?,
+      );
 }
 
 class UsageSummary {

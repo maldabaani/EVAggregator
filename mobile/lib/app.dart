@@ -95,6 +95,7 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               cancelReservation: driverApi.cancelReservation,
               fetchRewards: driverApi.getRewards,
               redeemReward: driverApi.redeemReward,
+              fetchUsageInsights: driverApi.getUsageInsights,
             ),
           );
         },

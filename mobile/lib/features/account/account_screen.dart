@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/auth/auth_session.dart';
 import '../../core/models/reservation.dart';
 import '../../core/models/reward.dart';
+import '../analytics/insights_screen.dart';
 
 typedef ReservationsFetcher = Future<List<Reservation>> Function();
 typedef ReservationCanceler = Future<void> Function(String reservationId);
@@ -15,6 +16,7 @@ class AccountScreen extends StatefulWidget {
   final ReservationCanceler? cancelReservation;
   final RewardsFetcher? fetchRewards;
   final RewardRedeemer? redeemReward;
+  final UsageFetcher? fetchUsageInsights;
 
   const AccountScreen({
     super.key,
@@ -23,6 +25,7 @@ class AccountScreen extends StatefulWidget {
     this.cancelReservation,
     this.fetchRewards,
     this.redeemReward,
+    this.fetchUsageInsights,
   });
 
   @override
@@ -143,6 +146,16 @@ class _AccountScreenState extends State<AccountScreen> {
             onPressed: widget.authSession.logout,
             child: const Text('Log out'),
           ),
+          if (widget.fetchUsageInsights != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton(
+              key: const Key('open-insights-button'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => InsightsScreen(fetcher: widget.fetchUsageInsights!),
+              )),
+              child: const Text('Charging insights'),
+            ),
+          ],
           if (widget.fetchReservations != null) ...[
             const SizedBox(height: 32),
             Text('My reservations', style: Theme.of(context).textTheme.titleMedium),

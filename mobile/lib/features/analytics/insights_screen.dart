@@ -4,10 +4,10 @@ import '../session/session_tracking.dart' show formatCost;
 import 'usage_insights.dart';
 
 /// Task 5.4 — driver analytics & insights dashboard. Fetches the driver's
-/// own daily usage rollups (Task 4.4's per-driver aggregation, exposed to
-/// this app via the BFF) for the trailing [periodDays] and the equal-length
-/// period immediately before it, so the dashboard can show a spend trend
-/// rather than just a flat total.
+/// own daily usage (grouped server-side from their completed-session
+/// history) for the trailing [periodDays] and the equal-length period
+/// immediately before it, so the dashboard can show a spend trend rather
+/// than just a flat total.
 typedef UsageFetcher = Future<List<DailyUsagePoint>> Function(DateTime from, DateTime to);
 
 class InsightsScreen extends StatefulWidget {

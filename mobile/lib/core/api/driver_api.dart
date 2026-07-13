@@ -4,6 +4,7 @@ import '../models/reservation.dart';
 import '../models/reward.dart';
 import '../models/route_plan.dart';
 import '../models/vehicle.dart';
+import '../../features/analytics/usage_insights.dart';
 import '../../features/map/map_query.dart';
 import '../../features/map/map_screen.dart' show StartChargingResult;
 import '../../features/map/pin_clustering.dart';
@@ -177,6 +178,20 @@ class DriverApi {
   Future<int> redeemReward(String rewardId) async {
     final response = await client.post('/driver/rewards/redeem', body: {'driver_id': '', 'reward_id': rewardId});
     return (response as Map<String, dynamic>)['balance'] as int;
+  }
+
+  /// `date_from`/`date_to` are calendar dates (no time component) — the
+  /// backend's `GET /driver/usage-insights` groups by day, so only the
+  /// date part matters.
+  Future<List<DailyUsagePoint>> getUsageInsights(DateTime from, DateTime to) async {
+    String isoDate(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final response = await client.get(
+      '/driver/usage-insights',
+      query: {'date_from': isoDate(from), 'date_to': isoDate(to)},
+    ) as Map<String, dynamic>;
+    final data = response['data'] as List<dynamic>;
+    return data.map((item) => DailyUsagePoint.fromJson(item as Map<String, dynamic>)).toList();
   }
 
   Future<RoutePlanResult> planRoute(

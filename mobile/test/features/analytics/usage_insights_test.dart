@@ -121,4 +121,34 @@ void main() {
       expect(favoriteSite(points), isNull);
     });
   });
+
+  group('DailyUsagePoint.fromJson', () {
+    test('parses a point with a top site', () {
+      final point = DailyUsagePoint.fromJson({
+        'usage_date': '2026-01-10',
+        'session_count': 2,
+        'kwh_total': 8.0,
+        'cost_total_minor_units': 800,
+        'top_site_name': 'Downtown Mall',
+      });
+
+      expect(point.date, DateTime(2026, 1, 10));
+      expect(point.sessionCount, 2);
+      expect(point.kwhTotal, 8.0);
+      expect(point.costTotalMinorUnits, 800);
+      expect(point.topSiteName, 'Downtown Mall');
+    });
+
+    test('parses a null top site', () {
+      final point = DailyUsagePoint.fromJson({
+        'usage_date': '2026-01-10',
+        'session_count': 1,
+        'kwh_total': 1.0,
+        'cost_total_minor_units': 100,
+        'top_site_name': null,
+      });
+
+      expect(point.topSiteName, isNull);
+    });
+  });
 }

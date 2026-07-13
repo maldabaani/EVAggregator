@@ -505,4 +505,37 @@ void main() {
 
     expect(snapshot.status, SessionStatus.finished);
   });
+
+  test('getUsageInsights sends date-only query params and parses the points', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/driver/usage-insights');
+          expect(request.url.queryParameters['date_from'], '2026-01-01');
+          expect(request.url.queryParameters['date_to'], '2026-01-31');
+          return http.Response(
+            jsonEncode({
+              'data': [
+                {
+                  'usage_date': '2026-01-10',
+                  'session_count': 2,
+                  'kwh_total': 8.0,
+                  'cost_total_minor_units': 800,
+                  'top_site_name': 'Downtown Mall',
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final points = await api.getUsageInsights(DateTime(2026, 1, 1), DateTime(2026, 1, 31));
+
+    expect(points, hasLength(1));
+    expect(points.single.sessionCount, 2);
+    expect(points.single.topSiteName, 'Downtown Mall');
+  });
 }

@@ -251,4 +251,38 @@ void main() {
 
     expect(find.text('Rewards'), findsNothing);
   });
+
+  testWidgets('tapping Charging insights opens the insights screen', (tester) async {
+    final session = loggedInSession();
+    await session.login(email: 'driver@example.com', password: 'hunter2');
+    DateTime? capturedFrom;
+
+    await tester.pumpWidget(MaterialApp(
+      home: AccountScreen(
+        authSession: session,
+        fetchUsageInsights: (from, to) async {
+          capturedFrom = from;
+          return [];
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('open-insights-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('insights-loading')), findsNothing);
+    expect(find.text('Your charging insights'), findsOneWidget);
+    expect(capturedFrom, isNotNull);
+  });
+
+  testWidgets('no Charging insights button appears when fetchUsageInsights is not provided', (tester) async {
+    final session = loggedInSession();
+    await session.login(email: 'driver@example.com', password: 'hunter2');
+
+    await tester.pumpWidget(MaterialApp(home: AccountScreen(authSession: session)));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('open-insights-button')), findsNothing);
+  });
 }

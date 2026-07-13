@@ -44,6 +44,7 @@ describe('PartnerListComponent', () => {
     const partners: Partner[] = [
       {
         id: 'p-1',
+        tenant_id: 'tenant-1',
         party_id: 'ABC',
         country_code: 'AE',
         negotiated_version: '2.2.1',
@@ -67,6 +68,7 @@ describe('PartnerListComponent', () => {
     const partners: Partner[] = [
       {
         id: 'p-1',
+        tenant_id: 'tenant-1',
         party_id: 'ABC',
         country_code: 'AE',
         negotiated_version: '2.2.1',

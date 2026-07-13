@@ -43,6 +43,7 @@ class AttachPriceListRequest(BaseModel):
 def _partner_to_dict(partner: Partner) -> dict:
     return {
         "id": str(partner.id),
+        "tenant_id": str(partner.tenant_id),
         "party_id": partner.party_id,
         "country_code": partner.country_code,
         "negotiated_version": partner.negotiated_version,

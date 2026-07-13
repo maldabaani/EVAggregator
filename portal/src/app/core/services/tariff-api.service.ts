@@ -1,6 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 import { TariffComponentForm } from '../models/tariff.model';
 import { devTenantHeaders } from './dev-tenant-header';
@@ -16,6 +17,15 @@ export class TariffApiService {
   private readonly baseUrl = '/admin/tariffs';
 
   constructor(private readonly http: HttpClient) {}
+
+  list(tenantId: string): Observable<SavedTariff[]> {
+    return this.http
+      .get<{ data: SavedTariff[] }>(this.baseUrl, {
+        params: { tenant_id: tenantId },
+        headers: devTenantHeaders(tenantId),
+      })
+      .pipe(map((response) => response.data));
+  }
 
   create(tenantId: string, name: string, components: TariffComponentForm[]): Observable<SavedTariff> {
     return this.http.post<SavedTariff>(

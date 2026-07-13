@@ -5,6 +5,7 @@ import { ActivatedRoute } from '@angular/router';
 
 import { ReconciliationEntry } from '../../../core/models/partner.model';
 import { PartnerApiService } from '../../../core/services/partner-api.service';
+import { SavedTariff, TariffApiService } from '../../../core/services/tariff-api.service';
 
 type TabId = 'credentials' | 'price-lists' | 'reconciliation';
 
@@ -24,6 +25,9 @@ export class PartnerDetailComponent implements OnInit {
   reconciliationStatusFilter = '';
   reconciliationError: string | null = null;
 
+  tariffs: SavedTariff[] = [];
+  tariffsError: string | null = null;
+
   priceListForm = {
     connectorType: 'CCS2',
     tariffId: '',
@@ -35,15 +39,35 @@ export class PartnerDetailComponent implements OnInit {
   constructor(
     private readonly route: ActivatedRoute,
     private readonly partnerApi: PartnerApiService,
+    private readonly tariffApi: TariffApiService,
   ) {}
 
   ngOnInit(): void {
     this.partnerId = this.route.snapshot.paramMap.get('id') ?? '';
     this.loadReconciliation();
+    this.loadTariffs();
   }
 
   setTab(tab: TabId): void {
     this.activeTab = tab;
+  }
+
+  loadTariffs(): void {
+    this.tariffsError = null;
+    this.partnerApi.listPartners().subscribe({
+      next: (partners) => {
+        const partner = partners.find((p) => p.id === this.partnerId);
+        if (!partner) {
+          this.tariffsError = 'Could not determine this partner\'s tenant.';
+          return;
+        }
+        this.tariffApi.list(partner.tenant_id).subscribe({
+          next: (tariffs) => (this.tariffs = tariffs),
+          error: () => (this.tariffsError = 'Could not load tariffs.'),
+        });
+      },
+      error: () => (this.tariffsError = 'Could not load tariffs.'),
+    });
   }
 
   rotateToken(): void {
@@ -68,7 +92,7 @@ export class PartnerDetailComponent implements OnInit {
           this.priceListForm = { connectorType: 'CCS2', tariffId: '', effectiveFrom: '' };
           this.priceListSaved = true;
         },
-        error: () => (this.priceListError = 'Could not attach the price list. Check the tariff ID and try again.'),
+        error: () => (this.priceListError = 'Could not attach the price list. Please try again.'),
       });
   }
 

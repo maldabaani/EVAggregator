@@ -82,3 +82,52 @@ def test_preview_endpoint_returns_404_for_unknown_tariff():
     response = client.get(f"/admin/tariffs/{uuid.uuid4()}/preview", params={"duration_min": 30, "kwh": 15})
 
     assert response.status_code == 404
+
+
+def test_list_tariffs_endpoint_returns_all_created_tariffs():
+    app, _ = _build_app()
+    client = TestClient(app)
+    client.post(
+        "/admin/tariffs",
+        json={
+            "tenant_id": str(TENANT_ID),
+            "name": "Standard",
+            "components": [{"type": "energy", "price_minor_units": 150, "step_size": 1}],
+        },
+    )
+
+    response = client.get("/admin/tariffs")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 1
+    assert data[0]["name"] == "Standard"
+    assert data[0]["currency"] == "AED"
+
+
+def test_list_tariffs_endpoint_filters_by_tenant_id():
+    app, _ = _build_app()
+    client = TestClient(app)
+    other_tenant = uuid.uuid4()
+    client.post(
+        "/admin/tariffs",
+        json={
+            "tenant_id": str(TENANT_ID),
+            "name": "Mine",
+            "components": [{"type": "energy", "price_minor_units": 150, "step_size": 1}],
+        },
+    )
+    client.post(
+        "/admin/tariffs",
+        json={
+            "tenant_id": str(other_tenant),
+            "name": "Not mine",
+            "components": [{"type": "energy", "price_minor_units": 150, "step_size": 1}],
+        },
+    )
+
+    response = client.get("/admin/tariffs", params={"tenant_id": str(TENANT_ID)})
+
+    data = response.json()["data"]
+    assert len(data) == 1
+    assert data[0]["name"] == "Mine"

@@ -30,15 +30,22 @@
         </select>
       </label>
       <label>
-        Tariff ID
-        <input name="tariffId" [(ngModel)]="priceListForm.tariffId" required data-testid="tariff-id-input" />
+        Tariff
+        <select name="tariffId" [(ngModel)]="priceListForm.tariffId" required data-testid="tariff-id-select">
+          <option value="" disabled>Select a tariff…</option>
+          <option *ngFor="let tariff of tariffs" [value]="tariff.id">{{ tariff.name }} ({{ tariff.currency }})</option>
+        </select>
       </label>
       <label>
         Effective from
         <input type="datetime-local" name="effectiveFrom" [(ngModel)]="priceListForm.effectiveFrom" required data-testid="effective-from-input" />
       </label>
-      <button type="submit" data-testid="attach-price-list-button">Attach</button>
+      <button type="submit" [disabled]="tariffs.length === 0" data-testid="attach-price-list-button">Attach</button>
     </form>
+    <p *ngIf="!tariffsError && tariffs.length === 0" class="muted-text" data-testid="no-tariffs-message">
+      No tariffs yet for this partner's tenant — create one in the Tariff Builder first.
+    </p>
+    <p *ngIf="tariffsError" class="error-text" data-testid="tariffs-error">{{ tariffsError }}</p>
     <p *ngIf="priceListSaved" class="success-text" data-testid="price-list-saved">Price list attached.</p>
     <p *ngIf="priceListError" class="error-text" data-testid="price-list-error">{{ priceListError }}</p>
   </section>

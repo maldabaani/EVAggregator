@@ -1,5 +1,6 @@
 export interface Partner {
   id: string;
+  tenant_id: string;
   party_id: string;
   country_code: string;
   negotiated_version: string | null;

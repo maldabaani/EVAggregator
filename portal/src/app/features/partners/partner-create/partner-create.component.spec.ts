@@ -47,6 +47,7 @@ describe('PartnerCreateComponent', () => {
     expect(req.request.body).toEqual({ tenant_id: TENANT_ID, party_id: 'XYZ', country_code: 'AE' });
     req.flush({
       id: 'partner-1',
+      tenant_id: TENANT_ID,
       party_id: 'XYZ',
       country_code: 'AE',
       negotiated_version: null,
@@ -78,6 +79,7 @@ describe('PartnerCreateComponent', () => {
     component.save();
     httpMock.expectOne('/admin/ocpi/partners').flush({
       id: 'partner-1',
+      tenant_id: TENANT_ID,
       party_id: 'XYZ',
       country_code: 'AE',
       negotiated_version: null,

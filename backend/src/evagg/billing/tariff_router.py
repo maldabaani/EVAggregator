@@ -44,6 +44,15 @@ def _to_inputs(components: list[TariffComponentBody]) -> list[TariffComponentInp
 def build_tariff_router(service_dependency) -> APIRouter:
     router = APIRouter(prefix="/admin/tariffs", tags=["tariffs"])
 
+    @router.get("")
+    async def list_tariffs(
+        tenant_id: uuid.UUID | None = None, service: TariffService = Depends(service_dependency)
+    ) -> dict:
+        tariffs = await service.list_all_tariffs()
+        if tenant_id is not None:
+            tariffs = [t for t in tariffs if t.tenant_id == tenant_id]
+        return {"data": [{"id": str(t.id), "name": t.name, "currency": t.currency} for t in tariffs]}
+
     @router.post("")
     async def create_tariff(body: CreateTariffBody, service: TariffService = Depends(service_dependency)) -> dict:
         try:

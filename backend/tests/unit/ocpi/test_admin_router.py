@@ -95,6 +95,7 @@ def test_create_partner_endpoint_returns_a_one_time_token_a():
 
     assert response.status_code == 200
     body = response.json()
+    assert body["tenant_id"] == str(TENANT_ID)
     assert body["party_id"] == "XYZ"
     assert body["country_code"] == "AE"
     assert body["status"] == "pending"

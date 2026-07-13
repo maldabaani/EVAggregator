@@ -2,7 +2,18 @@ import { HttpClientTestingModule, HttpTestingController } from '@angular/common/
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 
+import { Partner } from '../../../core/models/partner.model';
 import { PartnerDetailComponent } from './partner-detail.component';
+
+const PARTNER: Partner = {
+  id: 'partner-1',
+  tenant_id: 'tenant-1',
+  party_id: 'ABC',
+  country_code: 'AE',
+  negotiated_version: null,
+  status: 'pending',
+  last_handshake_at: null,
+};
 
 describe('PartnerDetailComponent', () => {
   let fixture: ComponentFixture<PartnerDetailComponent>;
@@ -32,9 +43,17 @@ describe('PartnerDetailComponent', () => {
     req.flush({ data: [] });
   }
 
+  function flushInitialTariffs(tariffs: { id: string; name: string; currency: string }[] = []) {
+    const partnersReq = httpMock.expectOne((r) => r.url === '/admin/ocpi/partners');
+    partnersReq.flush({ data: [PARTNER] });
+    const tariffsReq = httpMock.expectOne((r) => r.url === '/admin/tariffs');
+    tariffsReq.flush({ data: tariffs });
+  }
+
   it('defaults to the Credentials tab', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs();
 
     const compiled: HTMLElement = fixture.nativeElement;
     expect(compiled.querySelector('[data-testid="panel-credentials"]')).toBeTruthy();
@@ -44,6 +63,7 @@ describe('PartnerDetailComponent', () => {
   it('switches to the Price Lists tab on click', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs();
 
     const button = fixture.nativeElement.querySelector('[data-testid="tab-price-lists"]') as HTMLButtonElement;
     button.click();
@@ -55,6 +75,7 @@ describe('PartnerDetailComponent', () => {
   it('rotating the token invalidates the old one and shows the new token_a', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs();
 
     const button = fixture.nativeElement.querySelector('[data-testid="rotate-token-button"]') as HTMLButtonElement;
     button.click();
@@ -68,9 +89,39 @@ describe('PartnerDetailComponent', () => {
     );
   });
 
+  it('populates the tariff dropdown from the tenant\'s tariffs', () => {
+    fixture.detectChanges();
+    flushInitialReconciliation();
+    flushInitialTariffs([{ id: 'tariff-1', name: 'Standard', currency: 'AED' }]);
+
+    fixture.componentInstance.setTab('price-lists');
+    fixture.detectChanges();
+
+    const options = fixture.nativeElement.querySelectorAll('[data-testid="tariff-id-select"] option');
+    expect(options.length).toBe(2);
+    expect(options[1].textContent).toContain('Standard');
+    expect(fixture.nativeElement.querySelector('[data-testid="no-tariffs-message"]')).toBeFalsy();
+  });
+
+  it('shows a message and disables Attach when the tenant has no tariffs yet', () => {
+    fixture.detectChanges();
+    flushInitialReconciliation();
+    flushInitialTariffs([]);
+
+    fixture.componentInstance.setTab('price-lists');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="no-tariffs-message"]')).toBeTruthy();
+    const attachButton = fixture.nativeElement.querySelector(
+      '[data-testid="attach-price-list-button"]',
+    ) as HTMLButtonElement;
+    expect(attachButton.disabled).toBeTrue();
+  });
+
   it('attaching a price list posts the form values and resets the form', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs([{ id: 'tariff-1', name: 'Standard', currency: 'AED' }]);
 
     const component = fixture.componentInstance;
     component.priceListForm = { connectorType: 'Type2', tariffId: 'tariff-1', effectiveFrom: '2026-01-01T00:00' };
@@ -86,6 +137,7 @@ describe('PartnerDetailComponent', () => {
   it('changing the reconciliation status filter reloads entries with that filter', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs();
 
     fixture.componentInstance.reconciliationStatusFilter = 'mismatched';
     fixture.componentInstance.loadReconciliation();
@@ -100,6 +152,7 @@ describe('PartnerDetailComponent', () => {
   it('exportUrl reflects the current status filter', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs();
 
     fixture.componentInstance.reconciliationStatusFilter = 'matched';
 
@@ -109,6 +162,7 @@ describe('PartnerDetailComponent', () => {
   it('shows an error message when rotating the token fails (e.g. unknown partner id)', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs();
 
     const button = fixture.nativeElement.querySelector('[data-testid="rotate-token-button"]') as HTMLButtonElement;
     button.click();
@@ -125,6 +179,7 @@ describe('PartnerDetailComponent', () => {
   it('shows an error message when attaching a price list fails', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs([{ id: 'tariff-1', name: 'Standard', currency: 'AED' }]);
 
     const component = fixture.componentInstance;
     component.setTab('price-lists');
@@ -143,8 +198,10 @@ describe('PartnerDetailComponent', () => {
   it('shows a confirmation message when attaching a price list succeeds', () => {
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs([{ id: 'tariff-1', name: 'Standard', currency: 'AED' }]);
 
     fixture.componentInstance.setTab('price-lists');
+    fixture.componentInstance.priceListForm.tariffId = 'tariff-1';
     fixture.componentInstance.attachPriceList();
     httpMock.expectOne('/admin/ocpi/partners/partner-1/price-lists').flush(null);
     fixture.detectChanges();
@@ -160,6 +217,7 @@ describe('PartnerDetailComponent', () => {
       .expectOne((r) => r.url === '/admin/ocpi/reconciliation')
       .flush('boom', { status: 500, statusText: 'Server Error' });
     fixture.detectChanges();
+    flushInitialTariffs();
 
     expect(fixture.nativeElement.querySelector('[data-testid="reconciliation-error"]')).toBeTruthy();
   });
@@ -168,9 +226,22 @@ describe('PartnerDetailComponent', () => {
     fixture.componentInstance.setTab('reconciliation');
     fixture.detectChanges();
     flushInitialReconciliation();
+    flushInitialTariffs();
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('[data-testid="reconciliation-empty"]')).toBeTruthy();
     expect(fixture.nativeElement.querySelector('[data-testid="reconciliation-table"]')).toBeFalsy();
+  });
+
+  it('shows an error message when the tenant lookup for tariffs fails', () => {
+    fixture.detectChanges();
+    flushInitialReconciliation();
+
+    const partnersReq = httpMock.expectOne((r) => r.url === '/admin/ocpi/partners');
+    partnersReq.flush('boom', { status: 500, statusText: 'Server Error' });
+    fixture.componentInstance.setTab('price-lists');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="tariffs-error"]')).toBeTruthy();
   });
 });

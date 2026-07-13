@@ -9,6 +9,12 @@ records a session_id -> charger binding (mirroring
 `evagg.ocpi.commands.OcpiCommandService.start_session`'s exact pattern) —
 resolving auth without ever telling the charger to start would make
 "start charging" a no-op that only ever looked like it worked.
+
+`start_via_autocharge`/`start_via_plug_and_charge` also check the
+driver's own opt-in flag (`Vehicle.plug_and_charge_enabled`, toggled from
+the mobile app's "My Cars" screen) before dispatching — otherwise that
+toggle would have no actual effect on whether an automatic session-start
+is allowed to happen at all.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ from evagg.billing.payment_methods import PaymentMethod, PaymentMethodStore
 from evagg.charging_auth.autocharge import AutochargeMacStore, synthesize_id_tag_for_mac
 from evagg.charging_auth.plug_and_charge import PlugAndChargeError, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import QrTokenError, verify_qr_token
+from evagg.driver_app.vehicles import VehicleStore
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap, SessionChargerBinding
 from evagg.ocpp_gateway.commands import ChargerOfflineError, CommandStatus, RemoteCommandService
 from evagg.ocpp_gateway.transactions import TransactionRepository
@@ -67,12 +74,14 @@ class SessionStartService:
         command_service: RemoteCommandService,
         session_charger_map: InMemorySessionChargerMap,
         transaction_repository: TransactionRepository,
+        vehicle_store: VehicleStore,
     ) -> None:
         self._payment_method_store = payment_method_store
         self._wallet_id_for_driver = wallet_id_for_driver
         self._command_service = command_service
         self._session_charger_map = session_charger_map
         self._transaction_repository = transaction_repository
+        self._vehicle_store = vehicle_store
         # Tracks which driver started each session, regardless of auth
         # method, so status/stop can refuse a driver who isn't the one who
         # started it — without this, guessing or observing another
@@ -82,6 +91,16 @@ class SessionStartService:
     async def _resolve_payment_method(self, driver_id: uuid.UUID) -> PaymentMethod | None:
         wallet_id = self._wallet_id_for_driver(driver_id)
         return await self._payment_method_store.get_default(wallet_id)
+
+    async def _require_plug_and_charge_opt_in(self, driver_id: uuid.UUID) -> None:
+        # AutochargeMacStore/PlugAndChargeValidator resolve only a driver_id
+        # from the MAC address/certificate, not which specific vehicle it
+        # belongs to — so this checks whether *any* of the driver's
+        # vehicles has opted in, the most it can verify without a
+        # MAC/EMAID-to-vehicle mapping that doesn't exist yet.
+        vehicles = await self._vehicle_store.list_for_driver(driver_id)
+        if not any(v.plug_and_charge_enabled for v in vehicles):
+            raise SessionStartError("plug and charge is not enabled for this driver's vehicles")
 
     async def _dispatch_remote_start(
         self,
@@ -163,6 +182,7 @@ class SessionStartService:
         driver_id = await mac_store.get_driver_id_for_mac(mac_address)
         if driver_id is None:
             raise SessionStartError(f"no driver registered for MAC address {mac_address}")
+        await self._require_plug_and_charge_opt_in(driver_id)
 
         return await self._dispatch_remote_start(
             driver_id, tenant_id, charger_id, None, synthesize_id_tag_for_mac(mac_address), "autocharge",
@@ -175,6 +195,7 @@ class SessionStartService:
             driver_id = await validator.resolve_driver_from_cert(cert_token)
         except PlugAndChargeError as exc:
             raise SessionStartError(str(exc)) from exc
+        await self._require_plug_and_charge_opt_in(driver_id)
 
         return await self._dispatch_remote_start(
             driver_id, tenant_id, charger_id, None, synthesize_id_tag_for_driver(driver_id), "plug_and_charge",

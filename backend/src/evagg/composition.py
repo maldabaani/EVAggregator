@@ -374,6 +374,7 @@ def build_services() -> Services:
         command_service=remote_command_service,
         session_charger_map=session_charger_map,
         transaction_repository=transaction_repository,
+        vehicle_store=vehicle_store,
     )
 
     connection_manager = ConnectionManager(

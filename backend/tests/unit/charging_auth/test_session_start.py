@@ -10,6 +10,7 @@ from evagg.charging_auth.autocharge import InMemoryAutochargeMacStore
 from evagg.charging_auth.plug_and_charge import InMemoryEmaidDriverMap, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import sign_qr_token
 from evagg.charging_auth.session_start import SessionNotFoundError, SessionStartError, SessionStartService
+from evagg.driver_app.vehicles import InMemoryVehicleStore
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap
 from evagg.ocpp_gateway.commands import (
     CommandOutcome,
@@ -45,6 +46,7 @@ def _build_service(
     command_service=None,
     session_charger_map=None,
     transaction_repository=None,
+    vehicle_store=None,
 ):
     return SessionStartService(
         payment_method_store=payment_methods or InMemoryPaymentMethodStore(),
@@ -52,7 +54,13 @@ def _build_service(
         command_service=command_service or _build_command_service()[0],
         session_charger_map=session_charger_map or InMemorySessionChargerMap(),
         transaction_repository=transaction_repository or InMemoryTransactionRepository(),
+        vehicle_store=vehicle_store or InMemoryVehicleStore(),
     )
+
+
+async def _opt_in_a_vehicle(vehicle_store: InMemoryVehicleStore, driver_id: uuid.UUID) -> None:
+    vehicle = await vehicle_store.create(driver_id, "Tesla", "Model 3", "CCS2", 75.0)
+    await vehicle_store.set_plug_and_charge(vehicle.id, True)
 
 
 @pytest.mark.asyncio
@@ -78,9 +86,12 @@ async def test_all_four_methods_correctly_hook_up_default_payment_method():
     command_service, presence, transport = _build_command_service()
     for charger_id in ("CP-001", "CP-002", "CP-003", "CP-004"):
         await _mark_online_and_accept(presence, transport, charger_id)
+    vehicle_store = InMemoryVehicleStore()
+    await _opt_in_a_vehicle(vehicle_store, autocharge_driver_id)
+    await _opt_in_a_vehicle(vehicle_store, plug_and_charge_driver_id)
     service = _build_service(
         payment_methods=payment_methods, wallet_id_for_driver=lambda driver_id: wallet_ids[driver_id],
-        command_service=command_service,
+        command_service=command_service, vehicle_store=vehicle_store,
     )
 
     # QR
@@ -256,3 +267,80 @@ async def test_stop_session_refuses_a_driver_who_is_not_the_session_owner():
 
     with pytest.raises(SessionNotFoundError):
         await service.stop_session(result.session_id, uuid.uuid4(), TENANT_ID)
+
+
+@pytest.mark.asyncio
+async def test_autocharge_is_refused_when_the_driver_has_not_opted_in():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-011")
+    driver_id = uuid.uuid4()
+    mac_store = InMemoryAutochargeMacStore()
+    mac_store.register("AA:BB:CC:DD:EE:FF", driver_id)
+    # No vehicle created/opted-in for this driver.
+    service = _build_service(command_service=command_service)
+
+    with pytest.raises(SessionStartError):
+        await service.start_via_autocharge("AA:BB:CC:DD:EE:FF", "CP-011", TENANT_ID, mac_store)
+
+
+@pytest.mark.asyncio
+async def test_autocharge_is_refused_when_the_drivers_vehicle_has_opted_out():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-012")
+    driver_id = uuid.uuid4()
+    mac_store = InMemoryAutochargeMacStore()
+    mac_store.register("AA:BB:CC:DD:EE:FF", driver_id)
+    vehicle_store = InMemoryVehicleStore()
+    await vehicle_store.create(driver_id, "Nissan", "Leaf", "CHAdeMO", 40.0)  # created but never opted in
+    service = _build_service(command_service=command_service, vehicle_store=vehicle_store)
+
+    with pytest.raises(SessionStartError):
+        await service.start_via_autocharge("AA:BB:CC:DD:EE:FF", "CP-012", TENANT_ID, mac_store)
+
+
+@pytest.mark.asyncio
+async def test_autocharge_succeeds_once_the_driver_opts_in():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-013")
+    driver_id = uuid.uuid4()
+    mac_store = InMemoryAutochargeMacStore()
+    mac_store.register("AA:BB:CC:DD:EE:FF", driver_id)
+    vehicle_store = InMemoryVehicleStore()
+    await _opt_in_a_vehicle(vehicle_store, driver_id)
+    service = _build_service(command_service=command_service, vehicle_store=vehicle_store)
+
+    result = await service.start_via_autocharge("AA:BB:CC:DD:EE:FF", "CP-013", TENANT_ID, mac_store)
+
+    assert result.auth_method == "autocharge"
+
+
+@pytest.mark.asyncio
+async def test_plug_and_charge_is_refused_when_the_driver_has_not_opted_in():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-014")
+    driver_id = uuid.uuid4()
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca_cert = make_ca_cert(ca_key)
+    vehicle_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    emaid_map = InMemoryEmaidDriverMap()
+    emaid_map.register("EMAID-ABC", driver_id)
+    validator = PlugAndChargeValidator([pem(ca_cert)], emaid_map)
+    cert = make_leaf_cert(ca_key, ca_cert, vehicle_key.public_key(), emaid="EMAID-ABC")
+    service = _build_service(command_service=command_service)  # no opted-in vehicle
+
+    with pytest.raises(SessionStartError):
+        await service.start_via_plug_and_charge(pem(cert), "CP-014", TENANT_ID, validator)
+
+
+@pytest.mark.asyncio
+async def test_app_start_does_not_require_plug_and_charge_opt_in():
+    """The manual "Start Charging" button is an explicit driver action, not
+    an automatic one — it should never be gated by the Plug & Charge/
+    Autocharge opt-in flag."""
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-015")
+    service = _build_service(command_service=command_service)  # no opted-in vehicle
+
+    result = await service.start_via_app("CP-015", 1, uuid.uuid4(), TENANT_ID)
+
+    assert result.auth_method == "app"

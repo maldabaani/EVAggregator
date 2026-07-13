@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' hide LatLngBounds;
 import 'package:latlong2/latlong.dart' as ll;
 
+import '../../core/live_activity/live_activity_controller.dart';
 import '../../core/models/charger_filter.dart';
 import '../../core/models/reservation.dart';
 import 'live_status_feed.dart';
@@ -43,6 +44,7 @@ class MapScreen extends StatefulWidget {
   final StopChargingHandler? onStopCharging;
   final ReserveHandler? onReserve;
   final CancelReservationHandler? onCancelReservation;
+  final LiveActivityController liveActivityController;
 
   const MapScreen({
     super.key,
@@ -54,6 +56,7 @@ class MapScreen extends StatefulWidget {
     this.onStopCharging,
     this.onReserve,
     this.onCancelReservation,
+    this.liveActivityController = const NoopLiveActivityController(),
   });
 
   @override
@@ -132,6 +135,7 @@ class _MapScreenState extends State<MapScreen> {
           onStopCharging: widget.onStopCharging,
           onReserve: widget.onReserve,
           onCancelReservation: widget.onCancelReservation,
+          liveActivityController: widget.liveActivityController,
         ),
       ),
     );
@@ -246,6 +250,7 @@ class _StationDetailSheet extends StatefulWidget {
   final StopChargingHandler? onStopCharging;
   final ReserveHandler? onReserve;
   final CancelReservationHandler? onCancelReservation;
+  final LiveActivityController liveActivityController;
 
   const _StationDetailSheet({
     required this.chargerId,
@@ -253,6 +258,7 @@ class _StationDetailSheet extends StatefulWidget {
     this.onStopCharging,
     this.onReserve,
     this.onCancelReservation,
+    this.liveActivityController = const NoopLiveActivityController(),
   });
 
   @override
@@ -283,6 +289,11 @@ class _StationDetailSheetState extends State<_StationDetailSheet> {
     });
     try {
       final result = await widget.onStartCharging!(widget.chargerId, _connectorId);
+      await widget.liveActivityController.startChargingActivity(
+        sessionId: result.sessionId,
+        chargerId: widget.chargerId,
+        connectorId: _connectorId,
+      );
       if (!mounted) return;
       setState(() => _startedSessionId = result.sessionId);
     } catch (_) {
@@ -300,6 +311,7 @@ class _StationDetailSheetState extends State<_StationDetailSheet> {
     });
     try {
       await widget.onStopCharging!(_startedSessionId!);
+      await widget.liveActivityController.endChargingActivity(_startedSessionId!);
       if (!mounted) return;
       setState(() => _stopped = true);
     } catch (_) {

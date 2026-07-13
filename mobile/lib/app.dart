@@ -4,6 +4,7 @@ import 'app_shell.dart';
 import 'core/api/api_client.dart';
 import 'core/api/driver_api.dart';
 import 'core/auth/auth_session.dart';
+import 'core/live_activity/live_activity_controller.dart';
 import 'features/account/account_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
@@ -27,11 +28,13 @@ class EvAggregatorApp extends StatefulWidget {
 
 class _EvAggregatorAppState extends State<EvAggregatorApp> {
   bool _showSignup = false;
+  final IosLiveActivityController _liveActivityController = IosLiveActivityController();
 
   @override
   void initState() {
     super.initState();
     widget.authSession.restoreSession();
+    _liveActivityController.init();
   }
 
   @override
@@ -67,6 +70,7 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               onStopCharging: driverApi.stopCharging,
               onReserve: driverApi.reserveCharger,
               onCancelReservation: driverApi.cancelReservation,
+              liveActivityController: _liveActivityController,
             ),
             vehiclesScreen: VehicleListScreen(
               fetcher: driverApi.fetchVehicles,

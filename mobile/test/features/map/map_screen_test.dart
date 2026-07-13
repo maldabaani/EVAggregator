@@ -1,3 +1,4 @@
+import 'package:evagg_driver/core/live_activity/live_activity_controller.dart';
 import 'package:evagg_driver/core/models/charger_filter.dart';
 import 'package:evagg_driver/core/models/reservation.dart';
 import 'package:evagg_driver/features/map/live_status_feed.dart';
@@ -16,6 +17,29 @@ final _fakeTileBytes = Uri.parse(
 class _FakeTileProvider extends TileProvider {
   @override
   ImageProvider<Object> getImage(TileCoordinates coordinates, TileLayer options) => MemoryImage(_fakeTileBytes);
+}
+
+class _FakeLiveActivityController implements LiveActivityController {
+  final List<String> startedSessionIds = [];
+  final List<String> endedSessionIds = [];
+  String? lastChargerId;
+  int? lastConnectorId;
+
+  @override
+  Future<void> startChargingActivity({
+    required String sessionId,
+    required String chargerId,
+    required int connectorId,
+  }) async {
+    startedSessionIds.add(sessionId);
+    lastChargerId = chargerId;
+    lastConnectorId = connectorId;
+  }
+
+  @override
+  Future<void> endChargingActivity(String sessionId) async {
+    endedSessionIds.add(sessionId);
+  }
 }
 
 List<MapPin> _threePins() => const [
@@ -276,6 +300,39 @@ void main() {
 
     expect(stoppedSessionId, 'session-1');
     expect(find.byKey(const Key('stop-charging-success')), findsOneWidget);
+  });
+
+  testWidgets('starting and stopping a session drives the live activity controller', (tester) async {
+    final liveActivityController = _FakeLiveActivityController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async => const StartChargingResult(sessionId: 'session-1'),
+          onStopCharging: (sessionId) async {},
+          liveActivityController: liveActivityController,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(liveActivityController.startedSessionIds, ['session-1']);
+    expect(liveActivityController.lastChargerId, 'CP-002');
+    expect(liveActivityController.lastConnectorId, 1);
+    expect(liveActivityController.endedSessionIds, isEmpty);
+
+    await tester.tap(find.byKey(const Key('stop-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(liveActivityController.endedSessionIds, ['session-1']);
   });
 
   testWidgets('no Stop Charging button appears when onStopCharging is not provided', (tester) async {

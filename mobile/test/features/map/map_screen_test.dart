@@ -1,4 +1,5 @@
 import 'package:evagg_driver/core/models/charger_filter.dart';
+import 'package:evagg_driver/core/models/reservation.dart';
 import 'package:evagg_driver/features/map/live_status_feed.dart';
 import 'package:evagg_driver/features/map/map_screen.dart';
 import 'package:evagg_driver/features/map/pin_clustering.dart';
@@ -322,5 +323,105 @@ void main() {
     expect(find.byKey(const Key('stop-charging-error')), findsOneWidget);
     final button = tester.widget<ElevatedButton>(find.byKey(const Key('stop-charging-button')));
     expect(button.onPressed, isNotNull);
+  });
+
+  testWidgets('no Reserve button appears when onReserve is not provided', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('reserve-button')), findsNothing);
+  });
+
+  testWidgets('reserving calls onReserve with the charger, connector, and a future expiry', (tester) async {
+    String? capturedChargerId;
+    int? capturedConnectorId;
+    DateTime? capturedExpiresAt;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onReserve: (chargerId, connectorId, expiresAt) async {
+            capturedChargerId = chargerId;
+            capturedConnectorId = connectorId;
+            capturedExpiresAt = expiresAt;
+            return Reservation(id: 'r-1', chargerId: chargerId, connectorId: connectorId, expiresAt: expiresAt);
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reserve-button')));
+    await tester.pumpAndSettle();
+
+    expect(capturedChargerId, 'CP-002');
+    expect(capturedConnectorId, 1);
+    expect(capturedExpiresAt!.isAfter(DateTime.now()), isTrue);
+    expect(find.byKey(const Key('reserve-success')), findsOneWidget);
+  });
+
+  testWidgets('a failed reservation shows an inline error', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onReserve: (chargerId, connectorId, expiresAt) async => throw Exception('offline'),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reserve-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('reserve-error')), findsOneWidget);
+  });
+
+  testWidgets('after reserving, canceling calls onCancelReservation and shows confirmation', (tester) async {
+    String? canceledId;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onReserve: (chargerId, connectorId, expiresAt) async =>
+              Reservation(id: 'r-1', chargerId: chargerId, connectorId: connectorId, expiresAt: expiresAt),
+          onCancelReservation: (reservationId) async => canceledId = reservationId,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reserve-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('cancel-reservation-button')));
+    await tester.pumpAndSettle();
+
+    expect(canceledId, 'r-1');
+    expect(find.byKey(const Key('cancel-reservation-success')), findsOneWidget);
   });
 }

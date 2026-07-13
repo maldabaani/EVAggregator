@@ -64,6 +64,8 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               pinsFetcher: driverApi.fetchChargers,
               onStartCharging: driverApi.startCharging,
               onStopCharging: driverApi.stopCharging,
+              onReserve: driverApi.reserveCharger,
+              onCancelReservation: driverApi.cancelReservation,
             ),
             vehiclesScreen: VehicleListScreen(
               fetcher: driverApi.fetchVehicles,
@@ -77,7 +79,11 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               fetchPaymentMethod: driverApi.getPaymentMethod,
               setPaymentMethod: driverApi.setPaymentMethod,
             ),
-            accountScreen: AccountScreen(authSession: widget.authSession),
+            accountScreen: AccountScreen(
+              authSession: widget.authSession,
+              fetchReservations: driverApi.fetchReservations,
+              cancelReservation: driverApi.cancelReservation,
+            ),
           );
         },
       ),

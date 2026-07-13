@@ -275,4 +275,76 @@ void main() {
     expect(capturedBody['type'], 'wallet_balance');
     expect(method.type, 'wallet_balance');
   });
+
+  test('reserveCharger posts charger/connector/expiry and parses the reservation', () async {
+    late Map<String, dynamic> capturedBody;
+    final expiresAt = DateTime.now().add(const Duration(hours: 1));
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/driver/reservations');
+          capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(
+            jsonEncode({
+              'id': 'r-1',
+              'charger_id': 'CP-1',
+              'connector_id': 1,
+              'expires_at': expiresAt.toUtc().toIso8601String(),
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final reservation = await api.reserveCharger('CP-1', 1, expiresAt);
+
+    expect(capturedBody['charger_id'], 'CP-1');
+    expect(reservation.id, 'r-1');
+  });
+
+  test('fetchReservations parses the reservation list', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/driver/reservations');
+          return http.Response(
+            jsonEncode({
+              'data': [
+                {'id': 'r-1', 'charger_id': 'CP-1', 'connector_id': 1, 'expires_at': '2026-01-01T00:00:00Z'},
+              ],
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final reservations = await api.fetchReservations();
+
+    expect(reservations, hasLength(1));
+    expect(reservations.single.chargerId, 'CP-1');
+  });
+
+  test('cancelReservation sends a DELETE to the reservation path', () async {
+    late String capturedMethod;
+    late String capturedPath;
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          capturedMethod = request.method;
+          capturedPath = request.url.path;
+          return http.Response('', 204);
+        }),
+      ),
+    );
+
+    await api.cancelReservation('r-1');
+
+    expect(capturedMethod, 'DELETE');
+    expect(capturedPath, '/driver/reservations/r-1');
+  });
 }

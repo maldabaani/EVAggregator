@@ -1,5 +1,6 @@
 import '../models/charger_filter.dart';
 import '../models/payment_method.dart';
+import '../models/reservation.dart';
 import '../models/vehicle.dart';
 import '../../features/map/map_query.dart';
 import '../../features/map/map_screen.dart' show StartChargingResult;
@@ -127,5 +128,23 @@ class DriverApi {
   Future<PaymentMethod> setPaymentMethod(String type, String? pspToken) async {
     final response = await client.post('/wallet/payment-method', body: {'type': type, 'psp_token': pspToken});
     return PaymentMethod.fromJson(response as Map<String, dynamic>);
+  }
+
+  Future<Reservation> reserveCharger(String chargerId, int connectorId, DateTime expiresAt) async {
+    final response = await client.post(
+      '/driver/reservations',
+      body: {'charger_id': chargerId, 'connector_id': connectorId, 'expires_at': expiresAt.toUtc().toIso8601String()},
+    );
+    return Reservation.fromJson(response as Map<String, dynamic>);
+  }
+
+  Future<List<Reservation>> fetchReservations() async {
+    final response = await client.get('/driver/reservations');
+    final data = (response as Map<String, dynamic>)['data'] as List<dynamic>;
+    return data.map((item) => Reservation.fromJson(item as Map<String, dynamic>)).toList();
+  }
+
+  Future<void> cancelReservation(String reservationId) async {
+    await client.delete('/driver/reservations/$reservationId');
   }
 }

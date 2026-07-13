@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart' hide LatLngBounds;
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../../core/models/charger_filter.dart';
+import '../../core/models/reservation.dart';
 import 'live_status_feed.dart';
 import 'pin_clustering.dart';
 import 'search_debouncer.dart';
@@ -26,6 +27,8 @@ class StartChargingResult {
 
 typedef StartChargingHandler = Future<StartChargingResult> Function(String chargerId, int connectorId);
 typedef StopChargingHandler = Future<void> Function(String sessionId);
+typedef ReserveHandler = Future<Reservation> Function(String chargerId, int connectorId, DateTime expiresAt);
+typedef CancelReservationHandler = Future<void> Function(String reservationId);
 
 const ll.LatLng defaultMapCenter = ll.LatLng(25.2048, 55.2708); // Dubai
 const LatLngBounds defaultMapBounds = LatLngBounds(minLat: 25.05, minLng: 55.10, maxLat: 25.35, maxLng: 55.45);
@@ -38,6 +41,8 @@ class MapScreen extends StatefulWidget {
   final TileProvider? tileProvider;
   final StartChargingHandler? onStartCharging;
   final StopChargingHandler? onStopCharging;
+  final ReserveHandler? onReserve;
+  final CancelReservationHandler? onCancelReservation;
 
   const MapScreen({
     super.key,
@@ -47,6 +52,8 @@ class MapScreen extends StatefulWidget {
     this.tileProvider,
     this.onStartCharging,
     this.onStopCharging,
+    this.onReserve,
+    this.onCancelReservation,
   });
 
   @override
@@ -123,6 +130,8 @@ class _MapScreenState extends State<MapScreen> {
           chargerId: cluster.pins.first.id,
           onStartCharging: widget.onStartCharging,
           onStopCharging: widget.onStopCharging,
+          onReserve: widget.onReserve,
+          onCancelReservation: widget.onCancelReservation,
         ),
       ),
     );
@@ -224,23 +233,33 @@ class _PinMarker extends StatelessWidget {
   }
 }
 
-/// The charger-detail bottom sheet's "Start Charging"/"Stop Charging"
-/// section. Only shown when a handler is injected — the map screen is
-/// reused in places (or in tests) with no session-start capability at
-/// all. There's no live energy/power/cost shown here once charging starts
-/// — no read-side query for meter values exists in the backend yet — so
-/// this only ever reports whether a session was started/stopped, not what
-/// it's doing.
+/// The charger-detail bottom sheet's "Start Charging"/"Stop Charging" and
+/// "Reserve"/"Cancel reservation" sections. Each is only shown when its
+/// handler is injected — the map screen is reused in places (or in tests)
+/// with no session-start/reservation capability at all. There's no live
+/// energy/power/cost shown here once charging starts — no read-side query
+/// for meter values exists in the backend yet — so this only ever reports
+/// whether a session was started/stopped, not what it's doing.
 class _StationDetailSheet extends StatefulWidget {
   final String chargerId;
   final StartChargingHandler? onStartCharging;
   final StopChargingHandler? onStopCharging;
+  final ReserveHandler? onReserve;
+  final CancelReservationHandler? onCancelReservation;
 
-  const _StationDetailSheet({required this.chargerId, this.onStartCharging, this.onStopCharging});
+  const _StationDetailSheet({
+    required this.chargerId,
+    this.onStartCharging,
+    this.onStopCharging,
+    this.onReserve,
+    this.onCancelReservation,
+  });
 
   @override
   State<_StationDetailSheet> createState() => _StationDetailSheetState();
 }
+
+const Map<int, String> _reservationDurationLabels = {30: '30 minutes', 60: '1 hour', 120: '2 hours'};
 
 class _StationDetailSheetState extends State<_StationDetailSheet> {
   int _connectorId = 1;
@@ -249,6 +268,13 @@ class _StationDetailSheetState extends State<_StationDetailSheet> {
   bool _stopped = false;
   String? _error;
   String? _startedSessionId;
+
+  int _reservationDurationMinutes = 60;
+  bool _reserving = false;
+  bool _cancelingReservation = false;
+  bool _reservationCanceled = false;
+  String? _reservationError;
+  Reservation? _reservation;
 
   Future<void> _start() async {
     setState(() {
@@ -281,6 +307,41 @@ class _StationDetailSheetState extends State<_StationDetailSheet> {
       setState(() => _error = 'Could not stop charging. Please try again.');
     } finally {
       if (mounted) setState(() => _stopping = false);
+    }
+  }
+
+  Future<void> _reserve() async {
+    setState(() {
+      _reserving = true;
+      _reservationError = null;
+    });
+    try {
+      final expiresAt = DateTime.now().add(Duration(minutes: _reservationDurationMinutes));
+      final reservation = await widget.onReserve!(widget.chargerId, _connectorId, expiresAt);
+      if (!mounted) return;
+      setState(() => _reservation = reservation);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _reservationError = 'Could not reserve this charger. Please try again.');
+    } finally {
+      if (mounted) setState(() => _reserving = false);
+    }
+  }
+
+  Future<void> _cancelReservation() async {
+    setState(() {
+      _cancelingReservation = true;
+      _reservationError = null;
+    });
+    try {
+      await widget.onCancelReservation!(_reservation!.id);
+      if (!mounted) return;
+      setState(() => _reservationCanceled = true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _reservationError = 'Could not cancel this reservation. Please try again.');
+    } finally {
+      if (mounted) setState(() => _cancelingReservation = false);
     }
   }
 
@@ -352,6 +413,70 @@ class _StationDetailSheetState extends State<_StationDetailSheet> {
                 child: _starting
                     ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Text('Start Charging'),
+              ),
+            ],
+          ],
+          if (widget.onReserve != null) ...[
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 8),
+            if (_reservationCanceled)
+              const Text('Reservation canceled.', key: Key('cancel-reservation-success'))
+            else if (_reservation != null) ...[
+              Text(
+                'Reserved until ${_reservation!.expiresAt.toLocal()}.',
+                key: const Key('reserve-success'),
+              ),
+              if (_reservationError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _reservationError!,
+                    key: const Key('cancel-reservation-error'),
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              if (widget.onCancelReservation != null) ...[
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  key: const Key('cancel-reservation-button'),
+                  onPressed: _cancelingReservation ? null : _cancelReservation,
+                  child: _cancelingReservation
+                      ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Cancel reservation'),
+                ),
+              ],
+            ] else ...[
+              Row(
+                children: [
+                  const Text('Reserve for'),
+                  const SizedBox(width: 12),
+                  DropdownButton<int>(
+                    key: const Key('reservation-duration-dropdown'),
+                    value: _reservationDurationMinutes,
+                    items: _reservationDurationLabels.entries
+                        .map((entry) => DropdownMenuItem(value: entry.key, child: Text(entry.value)))
+                        .toList(),
+                    onChanged: (value) => setState(() => _reservationDurationMinutes = value ?? 60),
+                  ),
+                ],
+              ),
+              if (_reservationError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _reservationError!,
+                    key: const Key('reserve-error'),
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                key: const Key('reserve-button'),
+                onPressed: _reserving ? null : _reserve,
+                child: _reserving
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Reserve'),
               ),
             ],
           ],

@@ -19,7 +19,10 @@ is allowed to happen at all.
 `stop_session` awards rewards points on every successful stop
 (`evagg.driver_app.rewards`) — a completed session is the one place in
 this flow that unambiguously represents "the driver actually charged
-here," so it's the natural (and only) point to award from.
+here," so it's the natural (and only) point to award from. It also
+records a `CompletedSession` (`evagg.driver_app.session_history`) from
+that same live snapshot, the only persistent record of a finished
+session anywhere in this system — `usage_insights.py` reads it back.
 """
 
 from __future__ import annotations
@@ -35,11 +38,12 @@ from evagg.charging_auth.autocharge import AutochargeMacStore, synthesize_id_tag
 from evagg.charging_auth.plug_and_charge import PlugAndChargeError, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import QrTokenError, verify_qr_token
 from evagg.driver_app.rewards import RewardsService
+from evagg.driver_app.session_history import CompletedSession, SessionHistoryStore
 from evagg.driver_app.vehicles import VehicleStore
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap, SessionChargerBinding
 from evagg.ocpp_gateway.commands import ChargerOfflineError, CommandStatus, RemoteCommandService
 from evagg.ocpp_gateway.live_meter_readings import LatestMeterReadingStore
-from evagg.ocpp_gateway.transactions import TransactionRepository
+from evagg.ocpp_gateway.transactions import ActiveTransaction, TransactionRepository
 
 ENERGY_MEASURAND = "Energy.Active.Import.Register"
 POWER_MEASURAND = "Power.Active.Import"
@@ -90,6 +94,16 @@ class LiveSessionStatus:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class _LiveSnapshot:
+    energy_kwh: float
+    power_kw: float
+    cost_minor_units: int
+    currency: str
+    started_at: datetime
+    updated_at: datetime
+
+
 def synthesize_id_tag_for_driver(driver_id: uuid.UUID) -> str:
     return f"DRIVER:{driver_id}"
 
@@ -106,6 +120,7 @@ class SessionStartService:
         rewards_service: RewardsService,
         latest_meter_readings: LatestMeterReadingStore,
         tariff_service: TariffService,
+        session_history_store: SessionHistoryStore,
     ) -> None:
         self._payment_method_store = payment_method_store
         self._wallet_id_for_driver = wallet_id_for_driver
@@ -116,6 +131,7 @@ class SessionStartService:
         self._rewards_service = rewards_service
         self._latest_meter_readings = latest_meter_readings
         self._tariff_service = tariff_service
+        self._session_history_store = session_history_store
         # Tracks which driver started each session, regardless of auth
         # method, so status/stop can refuse a driver who isn't the one who
         # started it — without this, guessing or observing another
@@ -206,6 +222,20 @@ class SessionStartService:
                 currency=DEFAULT_LIVE_STATUS_CURRENCY, started_at=now, updated_at=now,
             )
 
+        snapshot = await self._compute_live_snapshot(active_transaction, tenant_id, now)
+        return LiveSessionStatus(
+            status="charging", energy_kwh=snapshot.energy_kwh, power_kw=snapshot.power_kw,
+            cost_minor_units=snapshot.cost_minor_units, currency=snapshot.currency,
+            started_at=snapshot.started_at, updated_at=snapshot.updated_at,
+        )
+
+    async def _compute_live_snapshot(
+        self, active_transaction: ActiveTransaction, tenant_id: uuid.UUID, now: datetime
+    ) -> _LiveSnapshot:
+        """Shared by `get_live_status` and `stop_session` (for the
+        completed-session record it writes) — the definitive settled cost
+        still comes from `SessionBillingService.charge_session`'s
+        caller-supplied amount, not from this estimate, in both cases."""
         transaction_id = active_transaction.id
         energy_reading = await self._latest_meter_readings.get_latest(transaction_id, ENERGY_MEASURAND)
         power_reading = await self._latest_meter_readings.get_latest(transaction_id, POWER_MEASURAND)
@@ -224,8 +254,8 @@ class SessionStartService:
             cost_minor_units = await self._tariff_service.preview(tariff.id, duration_minutes, energy_kwh)
             currency = tariff.currency
 
-        return LiveSessionStatus(
-            status="charging", energy_kwh=energy_kwh, power_kw=power_kw, cost_minor_units=cost_minor_units,
+        return _LiveSnapshot(
+            energy_kwh=energy_kwh, power_kw=power_kw, cost_minor_units=cost_minor_units,
             currency=currency, started_at=started_at, updated_at=updated_at,
         )
 
@@ -234,6 +264,9 @@ class SessionStartService:
         active_transaction = await self._transaction_repository.get_active_transaction(binding.charger_id)
         if active_transaction is None:
             raise SessionStartError("no active transaction on this charger")
+
+        now = datetime.now(timezone.utc)
+        snapshot = await self._compute_live_snapshot(active_transaction, tenant_id, now)
 
         try:
             result = await self._command_service.send_command(
@@ -246,6 +279,14 @@ class SessionStartService:
             raise SessionStartError(f"charge point responded {result.status.value}")
 
         await self._rewards_service.award_for_completed_session(driver_id)
+        await self._session_history_store.record(
+            CompletedSession(
+                session_id=session_id, driver_id=driver_id, charger_id=binding.charger_id,
+                started_at=active_transaction.start_timestamp, ended_at=now,
+                energy_kwh=snapshot.energy_kwh, cost_minor_units=snapshot.cost_minor_units,
+                currency=snapshot.currency,
+            )
+        )
 
     async def start_via_qr(
         self, token: str, driver_id: uuid.UUID, secret: str, tenant_id: uuid.UUID, now: float | None = None

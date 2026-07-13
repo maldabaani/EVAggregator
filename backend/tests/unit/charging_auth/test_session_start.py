@@ -28,6 +28,7 @@ from evagg.ocpp_gateway.commands import (
     InMemoryFirmwareUpdateStore,
     RemoteCommandService,
 )
+from evagg.driver_app.session_history import InMemorySessionHistoryStore
 from evagg.ocpp_gateway.live_meter_readings import InMemoryLatestMeterReadingStore
 from evagg.ocpp_gateway.meter_values import MeterReading
 from evagg.ocpp_gateway.presence import InMemoryPresenceRegistry
@@ -60,6 +61,7 @@ def _build_service(
     rewards_service=None,
     latest_meter_readings=None,
     tariff_service=None,
+    session_history_store=None,
 ):
     return SessionStartService(
         payment_method_store=payment_methods or InMemoryPaymentMethodStore(),
@@ -71,6 +73,7 @@ def _build_service(
         rewards_service=rewards_service or RewardsService(InMemoryRewardsStore()),
         latest_meter_readings=latest_meter_readings or InMemoryLatestMeterReadingStore(),
         tariff_service=tariff_service or TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider()),
+        session_history_store=session_history_store or InMemorySessionHistoryStore(),
     )
 
 
@@ -508,3 +511,54 @@ async def test_live_status_for_an_unowned_or_unknown_session_raises():
 
     with pytest.raises(SessionNotFoundError):
         await service.get_live_status("bogus-session-id", uuid.uuid4(), TENANT_ID)
+
+
+@pytest.mark.asyncio
+async def test_stopping_a_session_records_it_in_session_history():
+    from datetime import datetime, timezone
+
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-022")
+    transaction_repository = InMemoryTransactionRepository()
+    latest_meter_readings = InMemoryLatestMeterReadingStore()
+    session_history_store = InMemorySessionHistoryStore()
+    service = _build_service(
+        command_service=command_service, transaction_repository=transaction_repository,
+        latest_meter_readings=latest_meter_readings, session_history_store=session_history_store,
+    )
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-022", 1, driver_id, TENANT_ID)
+    txn = await transaction_repository.start_transaction(
+        "CP-022", TENANT_ID, 1, result.id_tag, meter_start=0, start_timestamp=datetime.now(timezone.utc)
+    )
+    await latest_meter_readings.update(
+        MeterReading(TENANT_ID, txn.id, "CP-022", datetime.now(timezone.utc), ENERGY_MEASURAND, 5.0, "kWh")
+    )
+
+    await service.stop_session(result.session_id, driver_id, TENANT_ID)
+
+    history = await session_history_store.list_for_driver(
+        driver_id, datetime.now(timezone.utc).date(), datetime.now(timezone.utc).date()
+    )
+    assert len(history) == 1
+    assert history[0].charger_id == "CP-022"
+    assert history[0].energy_kwh == 5.0
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stop_does_not_record_session_history():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-023")
+    session_history_store = InMemorySessionHistoryStore()
+    service = _build_service(command_service=command_service, session_history_store=session_history_store)
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-023", 1, driver_id, TENANT_ID)
+    # No StartTransaction.req arrived — stop_session should fail before recording.
+
+    with pytest.raises(SessionStartError):
+        await service.stop_session(result.session_id, driver_id, TENANT_ID)
+
+    from datetime import date
+
+    history = await session_history_store.list_for_driver(driver_id, date.min, date.max)
+    assert history == []

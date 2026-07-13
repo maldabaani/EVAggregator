@@ -69,6 +69,8 @@ from evagg.driver_app.reservations import DriverReservationService
 from evagg.driver_app.rewards import InMemoryRewardsStore, RewardsService
 from evagg.driver_app.route_planner import RoutePlanService
 from evagg.driver_app.routing_client import FakeRoutingClient, OsrmRoutingClient, RoutingClient
+from evagg.driver_app.session_history import InMemorySessionHistoryStore, SessionHistoryStore
+from evagg.driver_app.usage_insights import UsageInsightsService
 from evagg.driver_app.vehicles import InMemoryVehicleStore, VehicleStore
 from evagg.gateway.refresh_store import InMemoryRefreshTokenStore, RefreshTokenStore
 from evagg.identity.driver_auth import DriverAccountStore, InMemoryDriverAccountStore
@@ -185,6 +187,8 @@ class Services:
     vehicle_store: VehicleStore
     rewards_service: RewardsService
     route_plan_service: RoutePlanService
+    session_history_store: SessionHistoryStore
+    usage_insights_service: UsageInsightsService
 
     presence_registry: PresenceRegistry
     rate_limiter: RateLimiter
@@ -307,6 +311,8 @@ def build_services() -> Services:
     vehicle_store: VehicleStore = InMemoryVehicleStore()
     rewards_service = RewardsService(InMemoryRewardsStore())
     route_plan_service = RoutePlanService(_build_routing_client(), vehicle_store, location_repository)
+    session_history_store: SessionHistoryStore = InMemorySessionHistoryStore()
+    usage_insights_service = UsageInsightsService(session_history_store, location_repository)
 
     # --- OCPP gateway (Redis/NATS are real in both modes) -----------------
     presence_registry: PresenceRegistry = RedisPresenceRegistry(redis_client)
@@ -393,6 +399,7 @@ def build_services() -> Services:
         rewards_service=rewards_service,
         latest_meter_readings=latest_meter_readings,
         tariff_service=tariff_service,
+        session_history_store=session_history_store,
     )
 
     connection_manager = ConnectionManager(
@@ -441,6 +448,8 @@ def build_services() -> Services:
         vehicle_store=vehicle_store,
         rewards_service=rewards_service,
         route_plan_service=route_plan_service,
+        session_history_store=session_history_store,
+        usage_insights_service=usage_insights_service,
         presence_registry=presence_registry,
         rate_limiter=rate_limiter,
         event_bus=event_bus,

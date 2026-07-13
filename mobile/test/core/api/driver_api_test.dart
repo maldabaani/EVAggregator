@@ -347,4 +347,49 @@ void main() {
     expect(capturedMethod, 'DELETE');
     expect(capturedPath, '/driver/reservations/r-1');
   });
+
+  test('getRewards parses the balance and catalog', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/driver/rewards');
+          return http.Response(
+            jsonEncode({
+              'balance': 150,
+              'catalog': [
+                {'id': 'free-coffee', 'name': 'Free coffee voucher', 'points_cost': 100},
+              ],
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final rewards = await api.getRewards();
+
+    expect(rewards.balance, 150);
+    expect(rewards.catalog.single.id, 'free-coffee');
+    expect(rewards.catalog.single.pointsCost, 100);
+  });
+
+  test('redeemReward posts the reward id and parses the new balance', () async {
+    late Map<String, dynamic> capturedBody;
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/driver/rewards/redeem');
+          capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(jsonEncode({'balance': 50}), 200);
+        }),
+      ),
+    );
+
+    final balance = await api.redeemReward('free-coffee');
+
+    expect(capturedBody['reward_id'], 'free-coffee');
+    expect(balance, 50);
+  });
 }

@@ -46,6 +46,9 @@ void main() {
         if (request.url.path == '/wallet/balance') {
           return http.Response(jsonEncode({'balance_minor_units': 0}), 200);
         }
+        if (request.url.path == '/driver/rewards') {
+          return http.Response(jsonEncode({'balance': 0, 'catalog': []}), 200);
+        }
         // The app shell's tabs (Map, Wallet) fetch their own data as soon as
         // they're mounted via IndexedStack, regardless of which tab is
         // visible — an empty/zeroed result is enough to prove the shell

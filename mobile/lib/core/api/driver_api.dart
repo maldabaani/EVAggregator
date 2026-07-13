@@ -1,6 +1,7 @@
 import '../models/charger_filter.dart';
 import '../models/payment_method.dart';
 import '../models/reservation.dart';
+import '../models/reward.dart';
 import '../models/vehicle.dart';
 import '../../features/map/map_query.dart';
 import '../../features/map/map_screen.dart' show StartChargingResult;
@@ -146,5 +147,17 @@ class DriverApi {
 
   Future<void> cancelReservation(String reservationId) async {
     await client.delete('/driver/reservations/$reservationId');
+  }
+
+  /// `driver_id` isn't sent — the rewards forwarder always scopes the
+  /// balance/redemption to the caller's own verified identity.
+  Future<RewardsSummary> getRewards() async {
+    final response = await client.get('/driver/rewards');
+    return RewardsSummary.fromJson(response as Map<String, dynamic>);
+  }
+
+  Future<int> redeemReward(String rewardId) async {
+    final response = await client.post('/driver/rewards/redeem', body: {'driver_id': '', 'reward_id': rewardId});
+    return (response as Map<String, dynamic>)['balance'] as int;
   }
 }

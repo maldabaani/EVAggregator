@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:evagg_driver/core/api/api_client.dart';
 import 'package:evagg_driver/core/auth/auth_session.dart';
 import 'package:evagg_driver/core/models/reservation.dart';
+import 'package:evagg_driver/core/models/reward.dart';
 import 'package:evagg_driver/features/account/account_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -153,5 +154,101 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('My reservations'), findsNothing);
+  });
+
+  testWidgets('shows the rewards balance and catalog', (tester) async {
+    final session = loggedInSession();
+    await session.login(email: 'driver@example.com', password: 'hunter2');
+
+    await tester.pumpWidget(MaterialApp(
+      home: AccountScreen(
+        authSession: session,
+        fetchRewards: () async => const RewardsSummary(
+          balance: 150,
+          catalog: [RewardCatalogItem(id: 'free-coffee', name: 'Free coffee voucher', pointsCost: 100)],
+        ),
+        redeemReward: (id) async => 50,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('rewards-balance')), findsOneWidget);
+    expect(find.text('150 points'), findsOneWidget);
+    expect(find.byKey(const Key('reward-tile-free-coffee')), findsOneWidget);
+  });
+
+  testWidgets('redeeming a reward calls redeemReward and refreshes the balance', (tester) async {
+    final session = loggedInSession();
+    await session.login(email: 'driver@example.com', password: 'hunter2');
+    var balance = 150;
+    String? redeemedId;
+
+    await tester.pumpWidget(MaterialApp(
+      home: AccountScreen(
+        authSession: session,
+        fetchRewards: () async => RewardsSummary(
+          balance: balance,
+          catalog: const [RewardCatalogItem(id: 'free-coffee', name: 'Free coffee voucher', pointsCost: 100)],
+        ),
+        redeemReward: (id) async {
+          redeemedId = id;
+          balance -= 100;
+          return balance;
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('redeem-reward-button-free-coffee')));
+    await tester.pumpAndSettle();
+
+    expect(redeemedId, 'free-coffee');
+    expect(find.text('50 points'), findsOneWidget);
+  });
+
+  testWidgets('disables redeem when balance is below the points cost', (tester) async {
+    final session = loggedInSession();
+    await session.login(email: 'driver@example.com', password: 'hunter2');
+
+    await tester.pumpWidget(MaterialApp(
+      home: AccountScreen(
+        authSession: session,
+        fetchRewards: () async => const RewardsSummary(
+          balance: 10,
+          catalog: [RewardCatalogItem(id: 'free-coffee', name: 'Free coffee voucher', pointsCost: 100)],
+        ),
+        redeemReward: (id) async => 10,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final button = tester.widget<ElevatedButton>(find.byKey(const Key('redeem-reward-button-free-coffee')));
+    expect(button.onPressed, isNull);
+  });
+
+  testWidgets('shows an error when loading rewards fails', (tester) async {
+    final session = loggedInSession();
+    await session.login(email: 'driver@example.com', password: 'hunter2');
+
+    await tester.pumpWidget(MaterialApp(
+      home: AccountScreen(
+        authSession: session,
+        fetchRewards: () async => throw Exception('boom'),
+        redeemReward: (id) async => 0,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('rewards-error')), findsOneWidget);
+  });
+
+  testWidgets('no rewards section appears when fetchRewards is not provided', (tester) async {
+    final session = loggedInSession();
+    await session.login(email: 'driver@example.com', password: 'hunter2');
+
+    await tester.pumpWidget(MaterialApp(home: AccountScreen(authSession: session)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rewards'), findsNothing);
   });
 }

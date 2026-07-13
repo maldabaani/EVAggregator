@@ -83,6 +83,8 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               authSession: widget.authSession,
               fetchReservations: driverApi.fetchReservations,
               cancelReservation: driverApi.cancelReservation,
+              fetchRewards: driverApi.getRewards,
+              redeemReward: driverApi.redeemReward,
             ),
           );
         },

@@ -2,20 +2,27 @@ import 'package:flutter/material.dart';
 
 import '../../core/auth/auth_session.dart';
 import '../../core/models/reservation.dart';
+import '../../core/models/reward.dart';
 
 typedef ReservationsFetcher = Future<List<Reservation>> Function();
 typedef ReservationCanceler = Future<void> Function(String reservationId);
+typedef RewardsFetcher = Future<RewardsSummary> Function();
+typedef RewardRedeemer = Future<int> Function(String rewardId);
 
 class AccountScreen extends StatefulWidget {
   final AuthSession authSession;
   final ReservationsFetcher? fetchReservations;
   final ReservationCanceler? cancelReservation;
+  final RewardsFetcher? fetchRewards;
+  final RewardRedeemer? redeemReward;
 
   const AccountScreen({
     super.key,
     required this.authSession,
     this.fetchReservations,
     this.cancelReservation,
+    this.fetchRewards,
+    this.redeemReward,
   });
 
   @override
@@ -27,6 +34,11 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _loadingReservations = true;
   String? _reservationsError;
 
+  RewardsSummary? _rewards;
+  bool _loadingRewards = true;
+  String? _rewardsError;
+  String? _redeemingRewardId;
+
   @override
   void initState() {
     super.initState();
@@ -34,6 +46,11 @@ class _AccountScreenState extends State<AccountScreen> {
       _loadReservations();
     } else {
       _loadingReservations = false;
+    }
+    if (widget.fetchRewards != null) {
+      _loadRewards();
+    } else {
+      _loadingRewards = false;
     }
   }
 
@@ -65,6 +82,43 @@ class _AccountScreenState extends State<AccountScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _reservationsError = 'Could not cancel this reservation.');
+    }
+  }
+
+  Future<void> _loadRewards() async {
+    setState(() {
+      _loadingRewards = true;
+      _rewardsError = null;
+    });
+    try {
+      final rewards = await widget.fetchRewards!();
+      if (!mounted) return;
+      setState(() {
+        _rewards = rewards;
+        _loadingRewards = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingRewards = false;
+        _rewardsError = 'Could not load your rewards.';
+      });
+    }
+  }
+
+  Future<void> _redeem(RewardCatalogItem item) async {
+    setState(() {
+      _redeemingRewardId = item.id;
+      _rewardsError = null;
+    });
+    try {
+      await widget.redeemReward!(item.id);
+      await _loadRewards();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _rewardsError = 'Could not redeem "${item.name}".');
+    } finally {
+      if (mounted) setState(() => _redeemingRewardId = null);
     }
   }
 
@@ -120,6 +174,41 @@ class _AccountScreenState extends State<AccountScreen> {
                   ),
                 ),
               ),
+          ],
+          if (widget.fetchRewards != null) ...[
+            const SizedBox(height: 32),
+            Text('Rewards', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            if (_loadingRewards)
+              const Center(child: CircularProgressIndicator(key: Key('rewards-loading')))
+            else if (_rewardsError != null)
+              Text(
+                _rewardsError!,
+                key: const Key('rewards-error'),
+                style: const TextStyle(color: Colors.red),
+              )
+            else if (_rewards != null) ...[
+              Text('${_rewards!.balance} points', key: const Key('rewards-balance')),
+              const SizedBox(height: 8),
+              ..._rewards!.catalog.map(
+                (item) => Card(
+                  key: Key('reward-tile-${item.id}'),
+                  child: ListTile(
+                    title: Text(item.name),
+                    subtitle: Text('${item.pointsCost} points'),
+                    trailing: widget.redeemReward == null
+                        ? null
+                        : ElevatedButton(
+                            key: Key('redeem-reward-button-${item.id}'),
+                            onPressed: (_redeemingRewardId != null || _rewards!.balance < item.pointsCost)
+                                ? null
+                                : () => _redeem(item),
+                            child: Text(_redeemingRewardId == item.id ? 'Redeeming…' : 'Redeem'),
+                          ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ],
       ),

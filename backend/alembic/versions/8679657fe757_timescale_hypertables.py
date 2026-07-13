@@ -53,6 +53,28 @@ _PLAIN_ROLLUP_QUERY = """
     GROUP BY tenant_id, charger_id, transaction_id, measurand, unit, bucket
 """
 
+# TimescaleDB continuous aggregates refuse plain `date_trunc()` — they
+# require the query's bucketing expression to be its own `time_bucket()`
+# function ("continuous aggregate view must include a valid time bucket
+# function"), which only exists once the extension is loaded. The plain
+# Postgres fallback view above keeps `date_trunc` since `time_bucket`
+# isn't available there at all.
+_CONTINUOUS_AGGREGATE_QUERY = """
+    SELECT
+        tenant_id,
+        charger_id,
+        transaction_id,
+        measurand,
+        unit,
+        time_bucket(INTERVAL '1 hour', ts) AS bucket,
+        avg(value) AS avg_value,
+        max(value) AS max_value,
+        min(value) AS min_value,
+        count(*) AS sample_count
+    FROM meter_value
+    GROUP BY tenant_id, charger_id, transaction_id, measurand, unit, bucket
+"""
+
 
 def _timescaledb_available(bind) -> bool:
     """Testing-mode machines (this sandbox included) can't reach
@@ -106,7 +128,7 @@ def upgrade() -> None:
             f"""
             CREATE MATERIALIZED VIEW meter_value_hourly
             WITH (timescaledb.continuous) AS
-            {_PLAIN_ROLLUP_QUERY}
+            {_CONTINUOUS_AGGREGATE_QUERY}
             """
         )
     bind.execute(

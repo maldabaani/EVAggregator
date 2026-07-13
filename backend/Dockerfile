@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Runs either evagg.main:app (internal tenant-scoped services) or
 # evagg.edge_app:app (OCPI + OCPP WebSocket) — pick the module via the
 # APP_MODULE build arg / environment override in docker-compose.yml, since
@@ -15,7 +16,12 @@ COPY src ./src
 COPY alembic ./alembic
 COPY alembic.ini ./
 
-RUN pip install --no-cache-dir .
+# A cache mount (not --no-cache-dir) so a flaky-network retry doesn't
+# re-download every wheel from scratch; --timeout/--retries ride out a
+# slow/interrupted connection to PyPI instead of failing the whole build
+# on one dropped read.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --timeout 100 --retries 5 .
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000

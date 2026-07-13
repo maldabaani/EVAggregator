@@ -15,6 +15,11 @@ driver's own opt-in flag (`Vehicle.plug_and_charge_enabled`, toggled from
 the mobile app's "My Cars" screen) before dispatching — otherwise that
 toggle would have no actual effect on whether an automatic session-start
 is allowed to happen at all.
+
+`stop_session` awards rewards points on every successful stop
+(`evagg.driver_app.rewards`) — a completed session is the one place in
+this flow that unambiguously represents "the driver actually charged
+here," so it's the natural (and only) point to award from.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from evagg.billing.payment_methods import PaymentMethod, PaymentMethodStore
 from evagg.charging_auth.autocharge import AutochargeMacStore, synthesize_id_tag_for_mac
 from evagg.charging_auth.plug_and_charge import PlugAndChargeError, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import QrTokenError, verify_qr_token
+from evagg.driver_app.rewards import RewardsService
 from evagg.driver_app.vehicles import VehicleStore
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap, SessionChargerBinding
 from evagg.ocpp_gateway.commands import ChargerOfflineError, CommandStatus, RemoteCommandService
@@ -75,6 +81,7 @@ class SessionStartService:
         session_charger_map: InMemorySessionChargerMap,
         transaction_repository: TransactionRepository,
         vehicle_store: VehicleStore,
+        rewards_service: RewardsService,
     ) -> None:
         self._payment_method_store = payment_method_store
         self._wallet_id_for_driver = wallet_id_for_driver
@@ -82,6 +89,7 @@ class SessionStartService:
         self._session_charger_map = session_charger_map
         self._transaction_repository = transaction_repository
         self._vehicle_store = vehicle_store
+        self._rewards_service = rewards_service
         # Tracks which driver started each session, regardless of auth
         # method, so status/stop can refuse a driver who isn't the one who
         # started it — without this, guessing or observing another
@@ -162,6 +170,8 @@ class SessionStartService:
             raise SessionStartError(str(exc)) from exc
         if result.status != CommandStatus.ACCEPTED:
             raise SessionStartError(f"charge point responded {result.status.value}")
+
+        await self._rewards_service.award_for_completed_session(driver_id)
 
     async def start_via_qr(
         self, token: str, driver_id: uuid.UUID, secret: str, tenant_id: uuid.UUID, now: float | None = None

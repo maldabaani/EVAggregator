@@ -66,6 +66,7 @@ from evagg.fleet.cost_report import CostReportService
 from evagg.fleet.rollup import InMemoryRollupStore
 from evagg.gateway.rate_limit import RateLimiter, RedisRateLimiter
 from evagg.driver_app.reservations import DriverReservationService
+from evagg.driver_app.rewards import InMemoryRewardsStore, RewardsService
 from evagg.driver_app.vehicles import InMemoryVehicleStore, VehicleStore
 from evagg.gateway.refresh_store import InMemoryRefreshTokenStore, RefreshTokenStore
 from evagg.identity.driver_auth import DriverAccountStore, InMemoryDriverAccountStore
@@ -179,6 +180,7 @@ class Services:
     driver_account_store: DriverAccountStore
     driver_refresh_token_store: RefreshTokenStore
     vehicle_store: VehicleStore
+    rewards_service: RewardsService
 
     presence_registry: PresenceRegistry
     rate_limiter: RateLimiter
@@ -293,6 +295,7 @@ def build_services() -> Services:
     driver_account_store: DriverAccountStore = InMemoryDriverAccountStore()
     driver_refresh_token_store: RefreshTokenStore = InMemoryRefreshTokenStore()
     vehicle_store: VehicleStore = InMemoryVehicleStore()
+    rewards_service = RewardsService(InMemoryRewardsStore())
 
     # --- OCPP gateway (Redis/NATS are real in both modes) -----------------
     presence_registry: PresenceRegistry = RedisPresenceRegistry(redis_client)
@@ -375,6 +378,7 @@ def build_services() -> Services:
         session_charger_map=session_charger_map,
         transaction_repository=transaction_repository,
         vehicle_store=vehicle_store,
+        rewards_service=rewards_service,
     )
 
     connection_manager = ConnectionManager(
@@ -420,6 +424,7 @@ def build_services() -> Services:
         driver_account_store=driver_account_store,
         driver_refresh_token_store=driver_refresh_token_store,
         vehicle_store=vehicle_store,
+        rewards_service=rewards_service,
         presence_registry=presence_registry,
         rate_limiter=rate_limiter,
         event_bus=event_bus,

@@ -10,6 +10,7 @@ from evagg.charging_auth.autocharge import InMemoryAutochargeMacStore
 from evagg.charging_auth.plug_and_charge import InMemoryEmaidDriverMap, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import sign_qr_token
 from evagg.charging_auth.session_start import SessionNotFoundError, SessionStartError, SessionStartService
+from evagg.driver_app.rewards import InMemoryRewardsStore, RewardsService
 from evagg.driver_app.vehicles import InMemoryVehicleStore
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap
 from evagg.ocpp_gateway.commands import (
@@ -47,6 +48,7 @@ def _build_service(
     session_charger_map=None,
     transaction_repository=None,
     vehicle_store=None,
+    rewards_service=None,
 ):
     return SessionStartService(
         payment_method_store=payment_methods or InMemoryPaymentMethodStore(),
@@ -55,6 +57,7 @@ def _build_service(
         session_charger_map=session_charger_map or InMemorySessionChargerMap(),
         transaction_repository=transaction_repository or InMemoryTransactionRepository(),
         vehicle_store=vehicle_store or InMemoryVehicleStore(),
+        rewards_service=rewards_service or RewardsService(InMemoryRewardsStore()),
     )
 
 
@@ -344,3 +347,43 @@ async def test_app_start_does_not_require_plug_and_charge_opt_in():
     result = await service.start_via_app("CP-015", 1, uuid.uuid4(), TENANT_ID)
 
     assert result.auth_method == "app"
+
+
+@pytest.mark.asyncio
+async def test_stopping_a_session_awards_reward_points():
+    from datetime import datetime, timezone
+
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-016")
+    transaction_repository = InMemoryTransactionRepository()
+    rewards_service = RewardsService(InMemoryRewardsStore())
+    service = _build_service(
+        command_service=command_service, transaction_repository=transaction_repository,
+        rewards_service=rewards_service,
+    )
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-016", 1, driver_id, TENANT_ID)
+    await transaction_repository.start_transaction(
+        "CP-016", TENANT_ID, 1, result.id_tag, meter_start=0, start_timestamp=datetime.now(timezone.utc)
+    )
+    assert await rewards_service.get_balance(driver_id) == 0
+
+    await service.stop_session(result.session_id, driver_id, TENANT_ID)
+
+    assert await rewards_service.get_balance(driver_id) == 50
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stop_does_not_award_points():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-017")
+    rewards_service = RewardsService(InMemoryRewardsStore())
+    service = _build_service(command_service=command_service, rewards_service=rewards_service)
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-017", 1, driver_id, TENANT_ID)
+    # No StartTransaction.req arrived — stop_session should fail before awarding.
+
+    with pytest.raises(SessionStartError):
+        await service.stop_session(result.session_id, driver_id, TENANT_ID)
+
+    assert await rewards_service.get_balance(driver_id) == 0

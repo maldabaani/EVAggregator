@@ -30,6 +30,7 @@ from evagg.composition import build_services, shutdown_services, startup_service
 from evagg.core.config import settings
 from evagg.core.observability import configure_logging, instrument_app
 from evagg.core.tenancy import TenantContextMiddleware
+from evagg.driver_app.rewards_router import build_rewards_router
 from evagg.fleet.cost_report_router import build_cost_report_router
 from evagg.gateway.middleware import GatewaySignatureMiddleware
 from evagg.ocpp_gateway.command_router import build_command_router
@@ -95,6 +96,10 @@ async def _command_log_store():
     return services.command_log_store
 
 
+async def _rewards_service():
+    return services.rewards_service
+
+
 app.include_router(build_tariff_router(_tariff_service))
 app.include_router(build_wallet_router(_wallet_service))
 app.include_router(build_payment_method_router(_payment_method_store))
@@ -105,6 +110,7 @@ app.include_router(
     build_session_start_router(_session_start_service, _autocharge_mac_store, _plug_and_charge_validator)
 )
 app.include_router(build_session_router(_session_start_service))
+app.include_router(build_rewards_router(_rewards_service))
 app.include_router(build_presence_router(_presence_registry))
 app.include_router(build_command_router(_remote_command_service, _command_log_store))
 

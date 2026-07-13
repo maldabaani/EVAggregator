@@ -392,4 +392,59 @@ void main() {
     expect(capturedBody['reward_id'], 'free-coffee');
     expect(balance, 50);
   });
+
+  test('planRoute posts the vehicle/origin/destination and parses the plan', () async {
+    late Map<String, dynamic> capturedBody;
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/driver/route-plan');
+          capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(
+            jsonEncode({
+              'distance_km': 132.0,
+              'duration_minutes': 90.0,
+              'charging_stop_needed': true,
+              'suggested_charger': {'id': 'CP-1', 'name': 'Station 1', 'lat': 24.4, 'lng': 54.3},
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final plan = await api.planRoute('v-1', 25.2, 55.3, 24.4, 54.3);
+
+    expect(capturedBody['vehicle_id'], 'v-1');
+    expect(capturedBody['origin'], {'lat': 25.2, 'lng': 55.3});
+    expect(capturedBody['destination'], {'lat': 24.4, 'lng': 54.3});
+    expect(plan.distanceKm, 132.0);
+    expect(plan.chargingStopNeeded, isTrue);
+    expect(plan.suggestedCharger?.id, 'CP-1');
+  });
+
+  test('planRoute parses a plan with no suggested charger', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          return http.Response(
+            jsonEncode({
+              'distance_km': 10.0,
+              'duration_minutes': 8.0,
+              'charging_stop_needed': false,
+              'suggested_charger': null,
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final plan = await api.planRoute('v-1', 25.2, 55.3, 25.21, 55.31);
+
+    expect(plan.chargingStopNeeded, isFalse);
+    expect(plan.suggestedCharger, isNull);
+  });
 }

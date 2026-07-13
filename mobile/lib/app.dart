@@ -8,6 +8,7 @@ import 'features/account/account_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
 import 'features/map/map_screen.dart';
+import 'features/route_planner/route_planner_screen.dart';
 import 'features/vehicles/vehicle_list_screen.dart';
 import 'features/wallet/wallet_screen.dart';
 
@@ -78,6 +79,10 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               topUp: driverApi.topUpWallet,
               fetchPaymentMethod: driverApi.getPaymentMethod,
               setPaymentMethod: driverApi.setPaymentMethod,
+            ),
+            routePlannerScreen: RoutePlannerScreen(
+              fetchVehicles: driverApi.fetchVehicles,
+              planRoute: driverApi.planRoute,
             ),
             accountScreen: AccountScreen(
               authSession: widget.authSession,

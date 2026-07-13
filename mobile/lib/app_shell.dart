@@ -9,6 +9,7 @@ class AppShell extends StatefulWidget {
   final Widget mapScreen;
   final Widget vehiclesScreen;
   final Widget walletScreen;
+  final Widget routePlannerScreen;
   final Widget accountScreen;
 
   const AppShell({
@@ -16,6 +17,7 @@ class AppShell extends StatefulWidget {
     required this.mapScreen,
     required this.vehiclesScreen,
     required this.walletScreen,
+    required this.routePlannerScreen,
     required this.accountScreen,
   });
 
@@ -28,7 +30,13 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final tabs = [widget.mapScreen, widget.vehiclesScreen, widget.walletScreen, widget.accountScreen];
+    final tabs = [
+      widget.mapScreen,
+      widget.vehiclesScreen,
+      widget.walletScreen,
+      widget.routePlannerScreen,
+      widget.accountScreen,
+    ];
     return Scaffold(
       body: IndexedStack(index: _index, children: tabs),
       bottomNavigationBar: NavigationBar(
@@ -39,6 +47,7 @@ class _AppShellState extends State<AppShell> {
           NavigationDestination(key: Key('nav-map'), icon: Icon(Icons.map), label: 'Map'),
           NavigationDestination(key: Key('nav-vehicles'), icon: Icon(Icons.directions_car), label: 'My Cars'),
           NavigationDestination(key: Key('nav-wallet'), icon: Icon(Icons.account_balance_wallet), label: 'Wallet'),
+          NavigationDestination(key: Key('nav-route'), icon: Icon(Icons.alt_route), label: 'Route'),
           NavigationDestination(key: Key('nav-account'), icon: Icon(Icons.person), label: 'Account'),
         ],
       ),

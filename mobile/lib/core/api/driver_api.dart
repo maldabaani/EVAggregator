@@ -2,6 +2,7 @@ import '../models/charger_filter.dart';
 import '../models/payment_method.dart';
 import '../models/reservation.dart';
 import '../models/reward.dart';
+import '../models/route_plan.dart';
 import '../models/vehicle.dart';
 import '../../features/map/map_query.dart';
 import '../../features/map/map_screen.dart' show StartChargingResult;
@@ -159,5 +160,23 @@ class DriverApi {
   Future<int> redeemReward(String rewardId) async {
     final response = await client.post('/driver/rewards/redeem', body: {'driver_id': '', 'reward_id': rewardId});
     return (response as Map<String, dynamic>)['balance'] as int;
+  }
+
+  Future<RoutePlanResult> planRoute(
+    String vehicleId,
+    double originLat,
+    double originLng,
+    double destinationLat,
+    double destinationLng,
+  ) async {
+    final response = await client.post(
+      '/driver/route-plan',
+      body: {
+        'vehicle_id': vehicleId,
+        'origin': {'lat': originLat, 'lng': originLng},
+        'destination': {'lat': destinationLat, 'lng': destinationLng},
+      },
+    );
+    return RoutePlanResult.fromJson(response as Map<String, dynamic>);
   }
 }

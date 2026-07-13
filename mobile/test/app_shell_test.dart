@@ -9,6 +9,7 @@ void main() {
         mapScreen: Text('map-tab-content'),
         vehiclesScreen: Text('vehicles-tab-content'),
         walletScreen: Text('wallet-tab-content'),
+        routePlannerScreen: Text('route-tab-content'),
         accountScreen: Text('account-tab-content'),
       ),
     ));
@@ -28,8 +29,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(stack().index, 2);
 
-    await tester.tap(find.byKey(const Key('nav-account')));
+    await tester.tap(find.byKey(const Key('nav-route')));
     await tester.pumpAndSettle();
     expect(stack().index, 3);
+
+    await tester.tap(find.byKey(const Key('nav-account')));
+    await tester.pumpAndSettle();
+    expect(stack().index, 4);
   });
 }

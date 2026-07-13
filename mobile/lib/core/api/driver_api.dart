@@ -95,4 +95,8 @@ class DriverApi {
     final map = response as Map<String, dynamic>;
     return StartChargingResult(sessionId: map['session_id'] as String);
   }
+
+  Future<void> stopCharging(String sessionId) async {
+    await client.post('/charging/session/$sessionId/stop');
+  }
 }

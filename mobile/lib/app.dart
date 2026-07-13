@@ -62,6 +62,7 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               searchExecutor: driverApi.searchStations,
               pinsFetcher: driverApi.fetchChargers,
               onStartCharging: driverApi.startCharging,
+              onStopCharging: driverApi.stopCharging,
             ),
             vehiclesScreen: VehicleListScreen(
               fetcher: driverApi.fetchVehicles,

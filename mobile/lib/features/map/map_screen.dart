@@ -25,6 +25,7 @@ class StartChargingResult {
 }
 
 typedef StartChargingHandler = Future<StartChargingResult> Function(String chargerId, int connectorId);
+typedef StopChargingHandler = Future<void> Function(String sessionId);
 
 const ll.LatLng defaultMapCenter = ll.LatLng(25.2048, 55.2708); // Dubai
 const LatLngBounds defaultMapBounds = LatLngBounds(minLat: 25.05, minLng: 55.10, maxLat: 25.35, maxLng: 55.45);
@@ -36,6 +37,7 @@ class MapScreen extends StatefulWidget {
   final LiveStatusFeedController? statusFeed;
   final TileProvider? tileProvider;
   final StartChargingHandler? onStartCharging;
+  final StopChargingHandler? onStopCharging;
 
   const MapScreen({
     super.key,
@@ -44,6 +46,7 @@ class MapScreen extends StatefulWidget {
     this.statusFeed,
     this.tileProvider,
     this.onStartCharging,
+    this.onStopCharging,
   });
 
   @override
@@ -119,6 +122,7 @@ class _MapScreenState extends State<MapScreen> {
         child: _StationDetailSheet(
           chargerId: cluster.pins.first.id,
           onStartCharging: widget.onStartCharging,
+          onStopCharging: widget.onStopCharging,
         ),
       ),
     );
@@ -220,14 +224,19 @@ class _PinMarker extends StatelessWidget {
   }
 }
 
-/// The charger-detail bottom sheet's "Start Charging" section. Only shown
-/// when a handler is injected — the map screen is reused in places (or in
-/// tests) with no session-start capability at all.
+/// The charger-detail bottom sheet's "Start Charging"/"Stop Charging"
+/// section. Only shown when a handler is injected — the map screen is
+/// reused in places (or in tests) with no session-start capability at
+/// all. There's no live energy/power/cost shown here once charging starts
+/// — no read-side query for meter values exists in the backend yet — so
+/// this only ever reports whether a session was started/stopped, not what
+/// it's doing.
 class _StationDetailSheet extends StatefulWidget {
   final String chargerId;
   final StartChargingHandler? onStartCharging;
+  final StopChargingHandler? onStopCharging;
 
-  const _StationDetailSheet({required this.chargerId, this.onStartCharging});
+  const _StationDetailSheet({required this.chargerId, this.onStartCharging, this.onStopCharging});
 
   @override
   State<_StationDetailSheet> createState() => _StationDetailSheetState();
@@ -236,6 +245,8 @@ class _StationDetailSheet extends StatefulWidget {
 class _StationDetailSheetState extends State<_StationDetailSheet> {
   int _connectorId = 1;
   bool _starting = false;
+  bool _stopping = false;
+  bool _stopped = false;
   String? _error;
   String? _startedSessionId;
 
@@ -256,6 +267,23 @@ class _StationDetailSheetState extends State<_StationDetailSheet> {
     }
   }
 
+  Future<void> _stop() async {
+    setState(() {
+      _stopping = true;
+      _error = null;
+    });
+    try {
+      await widget.onStopCharging!(_startedSessionId!);
+      if (!mounted) return;
+      setState(() => _stopped = true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not stop charging. Please try again.');
+    } finally {
+      if (mounted) setState(() => _stopping = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -267,12 +295,33 @@ class _StationDetailSheetState extends State<_StationDetailSheet> {
           Text(widget.chargerId, style: Theme.of(context).textTheme.titleMedium),
           if (widget.onStartCharging != null) ...[
             const SizedBox(height: 16),
-            if (_startedSessionId != null)
+            if (_stopped)
+              const Text('Charging stopped.', key: Key('stop-charging-success'))
+            else if (_startedSessionId != null) ...[
               Text(
                 'Charging started (session ${_startedSessionId!}).',
                 key: const Key('start-charging-success'),
-              )
-            else ...[
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _error!,
+                    key: const Key('stop-charging-error'),
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              if (widget.onStopCharging != null) ...[
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  key: const Key('stop-charging-button'),
+                  onPressed: _stopping ? null : _stop,
+                  child: _stopping
+                      ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Stop Charging'),
+                ),
+              ],
+            ] else ...[
               Row(
                 children: [
                   const Text('Connector'),

@@ -246,4 +246,81 @@ void main() {
 
     expect(capturedConnectorId, 2);
   });
+
+  testWidgets('after a successful start, a Stop Charging button appears and stops the right session', (tester) async {
+    String? stoppedSessionId;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async => const StartChargingResult(sessionId: 'session-1'),
+          onStopCharging: (sessionId) async => stoppedSessionId = sessionId,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('stop-charging-button')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('stop-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(stoppedSessionId, 'session-1');
+    expect(find.byKey(const Key('stop-charging-success')), findsOneWidget);
+  });
+
+  testWidgets('no Stop Charging button appears when onStopCharging is not provided', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async => const StartChargingResult(sessionId: 'session-1'),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('stop-charging-button')), findsNothing);
+  });
+
+  testWidgets('a failed stop shows an inline error and leaves the button usable again', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          searchExecutor: (query) async => [],
+          pinsFetcher: (bbox, filter) async => _threePins(),
+          tileProvider: _FakeTileProvider(),
+          onStartCharging: (chargerId, connectorId) async => const StartChargingResult(sessionId: 'session-1'),
+          onStopCharging: (sessionId) async => throw Exception('offline'),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('map-pin-CP-002')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-charging-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('stop-charging-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('stop-charging-error')), findsOneWidget);
+    final button = tester.widget<ElevatedButton>(find.byKey(const Key('stop-charging-button')));
+    expect(button.onPressed, isNotNull);
+  });
 }

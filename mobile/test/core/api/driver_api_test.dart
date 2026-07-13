@@ -147,6 +147,26 @@ void main() {
     expect(result.sessionId, 'session-1');
   });
 
+  test('stopCharging posts to the session stop path', () async {
+    late String capturedPath;
+    late String capturedMethod;
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          capturedPath = request.url.path;
+          capturedMethod = request.method;
+          return http.Response('', 200);
+        }),
+      ),
+    );
+
+    await api.stopCharging('session-1');
+
+    expect(capturedPath, '/charging/session/session-1/stop');
+    expect(capturedMethod, 'POST');
+  });
+
   test('deleteVehicle sends a DELETE to the vehicle path', () async {
     late String capturedMethod;
     final api = DriverApi(

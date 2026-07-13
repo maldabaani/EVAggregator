@@ -87,13 +87,13 @@ export class CommandPanelComponent {
   }
 
   loadLog(): void {
-    const chargerId = this.form.value.chargerId;
-    if (!chargerId) {
+    const { chargerId, tenantId } = this.form.value;
+    if (!chargerId || !tenantId) {
       return;
     }
     this.logLoading = true;
     this.logError = null;
-    this.commandApi.listRecent(chargerId).subscribe({
+    this.commandApi.listRecent(chargerId, tenantId).subscribe({
       next: (records) => {
         this.log = records;
         this.logLoading = false;

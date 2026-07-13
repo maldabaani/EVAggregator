@@ -89,7 +89,7 @@
         type="button"
         class="button button--secondary"
         (click)="loadLog()"
-        [disabled]="logLoading || !form.value.chargerId"
+        [disabled]="logLoading || !form.value.chargerId || !form.value.tenantId"
         data-testid="refresh-log-button"
       >
         {{ logLoading ? 'Loading…' : 'Refresh' }}

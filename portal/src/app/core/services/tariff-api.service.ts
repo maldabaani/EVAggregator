@@ -3,6 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { TariffComponentForm } from '../models/tariff.model';
+import { devTenantHeaders } from './dev-tenant-header';
 
 export interface SavedTariff {
   id: string;
@@ -17,18 +18,19 @@ export class TariffApiService {
   constructor(private readonly http: HttpClient) {}
 
   create(tenantId: string, name: string, components: TariffComponentForm[]): Observable<SavedTariff> {
-    return this.http.post<SavedTariff>(this.baseUrl, {
-      tenant_id: tenantId,
-      name,
-      components: components.map(toApiComponent),
-    });
+    return this.http.post<SavedTariff>(
+      this.baseUrl,
+      { tenant_id: tenantId, name, components: components.map(toApiComponent) },
+      { headers: devTenantHeaders(tenantId) },
+    );
   }
 
-  update(tariffId: string, name: string, components: TariffComponentForm[]): Observable<SavedTariff> {
-    return this.http.put<SavedTariff>(`${this.baseUrl}/${tariffId}`, {
-      name,
-      components: components.map(toApiComponent),
-    });
+  update(tariffId: string, tenantId: string, name: string, components: TariffComponentForm[]): Observable<SavedTariff> {
+    return this.http.put<SavedTariff>(
+      `${this.baseUrl}/${tariffId}`,
+      { name, components: components.map(toApiComponent) },
+      { headers: devTenantHeaders(tenantId) },
+    );
   }
 }
 

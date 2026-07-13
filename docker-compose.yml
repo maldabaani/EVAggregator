@@ -82,6 +82,24 @@ services:
       redis:
         condition: service_healthy
 
+  # OAuth/PKCE token issuance (Task 6.3) plus, in app_mode=testing only, a
+  # dev-mode request forwarder standing in for the login flow the portal
+  # never got — signs whatever tenant id the portal states and forwards to
+  # backend-main. See evagg/gateway_app.py's module docstring; excluded
+  # entirely in app_mode=production.
+  gateway:
+    build:
+      context: ./backend
+      args:
+        APP_MODULE: evagg.gateway_app:app
+    ports:
+      - "8091:8000"
+    environment:
+      <<: *backend_env
+      EVAGG_INTERNAL_SERVICES_BASE_URL: http://backend-main:8000
+    depends_on:
+      - backend-main
+
   portal:
     build:
       context: ./portal
@@ -90,6 +108,7 @@ services:
     depends_on:
       - backend-main
       - backend-edge
+      - gateway
 
 volumes:
   pgdata:

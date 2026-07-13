@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     # forwards to internal services (Task 6.3) — resolved via secrets manager.
     gateway_trust_secret: str = "dev-only-insecure-secret-change-me"
 
+    # Where the gateway's dev-mode request forwarder (evagg.gateway.
+    # dev_forwarder) sends everything it signs — evagg.main in the
+    # docker-compose network. Task 6.3 never built the actual forwarding
+    # half of "signs and forwards to internal services", only OAuth token
+    # issuance; this setting exists for that forwarder, not for production
+    # use (a real deployment's gateway would sit behind a proper ingress,
+    # not this dev-only reverse proxy).
+    internal_services_base_url: str = "http://backend-main:8000"
+
     rate_limit_requests_per_window: int = 100
     rate_limit_window_seconds: int = 60
 

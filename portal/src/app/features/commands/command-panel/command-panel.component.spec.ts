@@ -75,6 +75,7 @@ describe('CommandPanelComponent', () => {
       command_type: 'Reset',
       payload: { type: 'Soft' },
     });
+    expect(req.request.headers.get('X-Dev-Tenant-Id')).toBe(TENANT_ID);
     req.flush(sampleResult());
     fixture.detectChanges();
 
@@ -120,13 +121,23 @@ describe('CommandPanelComponent', () => {
     fillChargerAndTenant();
     component.loadLog();
 
-    httpMock.expectOne((r) => r.url === `/admin/chargers/${CHARGER_ID}/commands`).flush([sampleLogRecord()]);
+    const req = httpMock.expectOne((r) => r.url === `/admin/chargers/${CHARGER_ID}/commands`);
+    expect(req.request.headers.get('X-Dev-Tenant-Id')).toBe(TENANT_ID);
+    req.flush([sampleLogRecord()]);
     fixture.detectChanges();
 
     const rows = compiled().querySelectorAll('[data-testid="log-row"]');
     expect(rows.length).toBe(1);
     expect(rows[0].textContent).toContain('Reset');
     expect(rows[0].textContent).toContain('accepted');
+  });
+
+  it('does not load the log when tenant ID is empty', () => {
+    component.form.patchValue({ chargerId: CHARGER_ID });
+    component.loadLog();
+
+    expect(component.logLoading).toBeFalse();
+    httpMock.expectNone(() => true);
   });
 
   it('shows the empty state when the log has no records', () => {

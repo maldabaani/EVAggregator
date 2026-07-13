@@ -11,6 +11,7 @@ import {
   fromRecordApiResponse,
   fromResultApiResponse,
 } from '../models/command.model';
+import { devTenantHeaders } from './dev-tenant-header';
 
 @Injectable({ providedIn: 'root' })
 export class CommandApiService {
@@ -23,18 +24,21 @@ export class CommandApiService {
     payload: Record<string, unknown>,
   ): Observable<CommandResult> {
     return this.http
-      .post<CommandResultApiResponse>(`/admin/chargers/${chargerId}/commands`, {
-        tenant_id: tenantId,
-        command_type: commandType,
-        payload,
-      })
+      .post<CommandResultApiResponse>(
+        `/admin/chargers/${chargerId}/commands`,
+        { tenant_id: tenantId, command_type: commandType, payload },
+        { headers: devTenantHeaders(tenantId) },
+      )
       .pipe(map(fromResultApiResponse));
   }
 
-  listRecent(chargerId: string, limit = 20): Observable<CommandLogRecord[]> {
+  listRecent(chargerId: string, tenantId: string, limit = 20): Observable<CommandLogRecord[]> {
     const params = new HttpParams().set('limit', limit);
     return this.http
-      .get<CommandLogRecordApiResponse[]>(`/admin/chargers/${chargerId}/commands`, { params })
+      .get<CommandLogRecordApiResponse[]>(`/admin/chargers/${chargerId}/commands`, {
+        params,
+        headers: devTenantHeaders(tenantId),
+      })
       .pipe(map((records) => records.map(fromRecordApiResponse)));
   }
 }

@@ -60,6 +60,7 @@ describe('CostDashboardComponent', () => {
 
     const req = httpMock.expectOne((r) => r.url === `/admin/teams/${TEAM_ID}/cost-report`);
     expect(req.request.params.get('group_by')).toBe('driver');
+    expect(req.request.headers.get('X-Dev-Tenant-Id')).toBe(TEAM_ID);
     req.flush(sampleResponse());
     fixture.detectChanges();
 
@@ -158,5 +159,8 @@ describe('CostDashboardComponent', () => {
     expect(link?.getAttribute('href')).toContain(`/admin/teams/${TEAM_ID}/cost-report/csv`);
     expect(link?.getAttribute('href')).toContain('date_from=2026-06-01');
     expect(link?.getAttribute('href')).toContain('date_to=2026-06-30');
+    // A plain download link can't carry a custom header, so the tenant id
+    // rides along as a query param instead — see dev_forwarder.py.
+    expect(link?.getAttribute('href')).toContain(`_dev_tenant_id=${TEAM_ID}`);
   });
 });

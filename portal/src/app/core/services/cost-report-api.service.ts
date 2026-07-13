@@ -3,6 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable, map } from 'rxjs';
 
 import { CostReport, CostReportApiResponse, CostReportGroupBy, fromApiResponse } from '../models/cost-report.model';
+import { devTenantHeaders } from './dev-tenant-header';
 
 @Injectable({ providedIn: 'root' })
 export class CostReportApiService {
@@ -16,12 +17,14 @@ export class CostReportApiService {
   ): Observable<CostReport> {
     const params = this.buildParams(dateFrom, dateTo, groupBy);
     return this.http
-      .get<CostReportApiResponse>(`/admin/teams/${teamId}/cost-report`, { params })
+      .get<CostReportApiResponse>(`/admin/teams/${teamId}/cost-report`, { params, headers: devTenantHeaders(teamId) })
       .pipe(map(fromApiResponse));
   }
 
   csvDownloadUrl(teamId: string, dateFrom: string, dateTo: string, groupBy: CostReportGroupBy): string {
-    const params = this.buildParams(dateFrom, dateTo, groupBy);
+    // A plain download link can't carry a custom header, so the tenant id
+    // rides along as a query param instead — see dev_forwarder.py.
+    const params = this.buildParams(dateFrom, dateTo, groupBy).set('_dev_tenant_id', teamId);
     return `/admin/teams/${teamId}/cost-report/csv?${params.toString()}`;
   }
 

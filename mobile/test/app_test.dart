@@ -43,8 +43,13 @@ void main() {
             200,
           );
         }
-        // The app shell mounts MapScreen immediately, which fetches pins —
-        // an empty result is enough to prove the shell itself rendered.
+        if (request.url.path == '/wallet/balance') {
+          return http.Response(jsonEncode({'balance_minor_units': 0}), 200);
+        }
+        // The app shell's tabs (Map, Wallet) fetch their own data as soon as
+        // they're mounted via IndexedStack, regardless of which tab is
+        // visible — an empty/zeroed result is enough to prove the shell
+        // itself rendered without needing per-tab detail here.
         return http.Response(jsonEncode({'data': []}), 200);
       }),
     );

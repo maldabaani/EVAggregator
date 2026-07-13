@@ -183,4 +183,96 @@ void main() {
 
     expect(capturedMethod, 'DELETE');
   });
+
+  test('getWalletBalance parses balance_minor_units', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/wallet/balance');
+          return http.Response(jsonEncode({'balance_minor_units': 1234}), 200);
+        }),
+      ),
+    );
+
+    final balance = await api.getWalletBalance();
+
+    expect(balance, 1234);
+  });
+
+  test('topUpWallet posts the amount, token, and currency', () async {
+    late Map<String, dynamic> capturedBody;
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/wallet/topup');
+          capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('', 200);
+        }),
+      ),
+    );
+
+    await api.topUpWallet(5000, 'tok-1', 'AED');
+
+    expect(capturedBody['amount_minor_units'], 5000);
+    expect(capturedBody['psp_token'], 'tok-1');
+    expect(capturedBody['currency'], 'AED');
+  });
+
+  test('getPaymentMethod returns null when none is set', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async => http.Response(jsonEncode({'data': null}), 200)),
+      ),
+    );
+
+    final method = await api.getPaymentMethod();
+
+    expect(method, isNull);
+  });
+
+  test('getPaymentMethod parses a set payment method', () async {
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          return http.Response(
+            jsonEncode({
+              'data': {'type': 'direct_card', 'psp_token': 'tok-1', 'is_default': true},
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final method = await api.getPaymentMethod();
+
+    expect(method?.type, 'direct_card');
+    expect(method?.pspToken, 'tok-1');
+  });
+
+  test('setPaymentMethod posts type and psp_token and parses the response', () async {
+    late Map<String, dynamic> capturedBody;
+    final api = DriverApi(
+      ApiClient(
+        baseUrl: 'https://api.example.com',
+        httpClient: MockClient((request) async {
+          expect(request.url.path, '/wallet/payment-method');
+          capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(
+            jsonEncode({'type': 'wallet_balance', 'psp_token': null, 'is_default': true}),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final method = await api.setPaymentMethod('wallet_balance', null);
+
+    expect(capturedBody['type'], 'wallet_balance');
+    expect(method.type, 'wallet_balance');
+  });
 }

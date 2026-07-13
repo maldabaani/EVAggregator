@@ -8,6 +8,7 @@ void main() {
       home: AppShell(
         mapScreen: Text('map-tab-content'),
         vehiclesScreen: Text('vehicles-tab-content'),
+        walletScreen: Text('wallet-tab-content'),
         accountScreen: Text('account-tab-content'),
       ),
     ));
@@ -23,8 +24,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(stack().index, 1);
 
-    await tester.tap(find.byKey(const Key('nav-account')));
+    await tester.tap(find.byKey(const Key('nav-wallet')));
     await tester.pumpAndSettle();
     expect(stack().index, 2);
+
+    await tester.tap(find.byKey(const Key('nav-account')));
+    await tester.pumpAndSettle();
+    expect(stack().index, 3);
   });
 }

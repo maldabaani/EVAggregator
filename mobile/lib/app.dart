@@ -9,6 +9,7 @@ import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
 import 'features/map/map_screen.dart';
 import 'features/vehicles/vehicle_list_screen.dart';
+import 'features/wallet/wallet_screen.dart';
 
 /// Root widget, separated from `main()` so widget tests can construct it
 /// with a fake [ApiClient]/[AuthSession] instead of the real HTTP/
@@ -69,6 +70,12 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
               creator: driverApi.createVehicle,
               toggler: driverApi.setPlugAndCharge,
               deleter: driverApi.deleteVehicle,
+            ),
+            walletScreen: WalletScreen(
+              fetchBalance: driverApi.getWalletBalance,
+              topUp: driverApi.topUpWallet,
+              fetchPaymentMethod: driverApi.getPaymentMethod,
+              setPaymentMethod: driverApi.setPaymentMethod,
             ),
             accountScreen: AccountScreen(authSession: widget.authSession),
           );

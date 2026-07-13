@@ -1,4 +1,5 @@
 import '../models/charger_filter.dart';
+import '../models/payment_method.dart';
 import '../models/vehicle.dart';
 import '../../features/map/map_query.dart';
 import '../../features/map/map_screen.dart' show StartChargingResult;
@@ -98,5 +99,33 @@ class DriverApi {
 
   Future<void> stopCharging(String sessionId) async {
     await client.post('/charging/session/$sessionId/stop');
+  }
+
+  Future<int> getWalletBalance() async {
+    final response = await client.get('/wallet/balance');
+    return (response as Map<String, dynamic>)['balance_minor_units'] as int;
+  }
+
+  Future<void> topUpWallet(int amountMinorUnits, String pspToken, String currency) async {
+    await client.post(
+      '/wallet/topup',
+      body: {
+        'wallet_id': '',
+        'psp_token': pspToken,
+        'amount_minor_units': amountMinorUnits,
+        'currency': currency,
+      },
+    );
+  }
+
+  Future<PaymentMethod?> getPaymentMethod() async {
+    final response = await client.get('/wallet/payment-method');
+    final data = (response as Map<String, dynamic>)['data'];
+    return data == null ? null : PaymentMethod.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<PaymentMethod> setPaymentMethod(String type, String? pspToken) async {
+    final response = await client.post('/wallet/payment-method', body: {'type': type, 'psp_token': pspToken});
+    return PaymentMethod.fromJson(response as Map<String, dynamic>);
   }
 }

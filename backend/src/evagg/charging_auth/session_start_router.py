@@ -20,7 +20,13 @@ from pydantic import BaseModel
 
 from evagg.charging_auth.autocharge import AutochargeMacStore
 from evagg.charging_auth.plug_and_charge import PlugAndChargeValidator
-from evagg.charging_auth.session_start import SessionStartError, SessionStartResult, SessionStartService
+from evagg.charging_auth.session_start import (
+    SessionNotFoundError,
+    SessionStartError,
+    SessionStartResult,
+    SessionStartService,
+    SessionStatus,
+)
 from evagg.core.tenancy import require_current_tenant
 
 
@@ -44,6 +50,14 @@ class AppStartRequest(BaseModel):
     charger_id: str
     connector_id: int
     driver_id: str
+
+
+class StopSessionRequest(BaseModel):
+    driver_id: str
+
+
+def _status_dict(status: SessionStatus) -> dict:
+    return {"charger_id": status.charger_id, "connector_id": status.connector_id, "active": status.active}
 
 
 def _result_dict(result: SessionStartResult) -> dict:
@@ -120,5 +134,41 @@ def build_session_start_router(
         except SessionStartError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _result_dict(result)
+
+    return router
+
+
+def build_session_router(service_dependency) -> APIRouter:
+    """GET .../status and POST .../stop for a session the `app` (or any
+    other) start method already created — a separate router/prefix from
+    `build_session_start_router` since these aren't "start" calls."""
+    router = APIRouter(prefix="/charging/session", tags=["charging-session"])
+
+    @router.get("/{session_id}/status")
+    async def get_status(
+        session_id: str,
+        driver_id: uuid.UUID,
+        service: SessionStartService = Depends(service_dependency),
+    ) -> dict:
+        try:
+            status = await service.get_session_status(session_id, driver_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="session not found") from exc
+        return _status_dict(status)
+
+    @router.post("/{session_id}/stop")
+    async def stop_session(
+        session_id: str,
+        body: StopSessionRequest,
+        service: SessionStartService = Depends(service_dependency),
+        tenant_id: uuid.UUID = Depends(require_current_tenant),
+    ) -> dict:
+        try:
+            await service.stop_session(session_id, uuid.UUID(body.driver_id), tenant_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="session not found") from exc
+        except SessionStartError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session_id": session_id, "stopped": True}
 
     return router

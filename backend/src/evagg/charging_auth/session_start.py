@@ -23,10 +23,18 @@ from evagg.charging_auth.plug_and_charge import PlugAndChargeError, PlugAndCharg
 from evagg.charging_auth.qr_token import QrTokenError, verify_qr_token
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap, SessionChargerBinding
 from evagg.ocpp_gateway.commands import ChargerOfflineError, CommandStatus, RemoteCommandService
+from evagg.ocpp_gateway.transactions import TransactionRepository
 
 
 class SessionStartError(Exception):
     pass
+
+
+class SessionNotFoundError(Exception):
+    """Raised for an unknown session_id, or one that belongs to a
+    different driver — the two are deliberately indistinguishable to the
+    caller, so a driver probing random session ids can't learn whether one
+    happens to exist."""
 
 
 @dataclass(frozen=True)
@@ -40,6 +48,13 @@ class SessionStartResult:
     auth_method: str  # 'qr' | 'autocharge' | 'plug_and_charge' | 'app'
 
 
+@dataclass(frozen=True)
+class SessionStatus:
+    charger_id: str
+    connector_id: int
+    active: bool
+
+
 def synthesize_id_tag_for_driver(driver_id: uuid.UUID) -> str:
     return f"DRIVER:{driver_id}"
 
@@ -51,11 +66,18 @@ class SessionStartService:
         wallet_id_for_driver: Callable[[uuid.UUID], uuid.UUID],
         command_service: RemoteCommandService,
         session_charger_map: InMemorySessionChargerMap,
+        transaction_repository: TransactionRepository,
     ) -> None:
         self._payment_method_store = payment_method_store
         self._wallet_id_for_driver = wallet_id_for_driver
         self._command_service = command_service
         self._session_charger_map = session_charger_map
+        self._transaction_repository = transaction_repository
+        # Tracks which driver started each session, regardless of auth
+        # method, so status/stop can refuse a driver who isn't the one who
+        # started it — without this, guessing or observing another
+        # driver's session_id would let you stop their charging session.
+        self._session_owner: dict[str, uuid.UUID] = {}
 
     async def _resolve_payment_method(self, driver_id: uuid.UUID) -> PaymentMethod | None:
         wallet_id = self._wallet_id_for_driver(driver_id)
@@ -84,11 +106,43 @@ class SessionStartService:
         self._session_charger_map.set_binding(
             session_id, SessionChargerBinding(charger_id, tenant_id, connector_id or 1)
         )
+        self._session_owner[session_id] = driver_id
         payment_method = await self._resolve_payment_method(driver_id)
         return SessionStartResult(
             session_id=session_id, driver_id=driver_id, charger_id=charger_id, connector_id=connector_id,
             id_tag=id_tag, payment_method=payment_method, auth_method=auth_method,
         )
+
+    async def _owned_binding(self, session_id: str, driver_id: uuid.UUID) -> SessionChargerBinding:
+        if self._session_owner.get(session_id) != driver_id:
+            raise SessionNotFoundError(session_id)
+        binding = await self._session_charger_map.get_charger_for_session(session_id)
+        if binding is None:
+            raise SessionNotFoundError(session_id)
+        return binding
+
+    async def get_session_status(self, session_id: str, driver_id: uuid.UUID) -> SessionStatus:
+        binding = await self._owned_binding(session_id, driver_id)
+        active_transaction = await self._transaction_repository.get_active_transaction(binding.charger_id)
+        return SessionStatus(
+            charger_id=binding.charger_id, connector_id=binding.connector_id, active=active_transaction is not None
+        )
+
+    async def stop_session(self, session_id: str, driver_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
+        binding = await self._owned_binding(session_id, driver_id)
+        active_transaction = await self._transaction_repository.get_active_transaction(binding.charger_id)
+        if active_transaction is None:
+            raise SessionStartError("no active transaction on this charger")
+
+        try:
+            result = await self._command_service.send_command(
+                binding.charger_id, tenant_id, "RemoteStopTransaction",
+                {"transactionId": str(active_transaction.id)},
+            )
+        except ChargerOfflineError as exc:
+            raise SessionStartError(str(exc)) from exc
+        if result.status != CommandStatus.ACCEPTED:
+            raise SessionStartError(f"charge point responded {result.status.value}")
 
     async def start_via_qr(
         self, token: str, driver_id: uuid.UUID, secret: str, tenant_id: uuid.UUID, now: float | None = None

@@ -36,6 +36,14 @@ def _build_upstream() -> FastAPI:
     async def start_app(body: dict, tenant_id: uuid.UUID = Depends(require_current_tenant)) -> dict:
         return {"tenant_id": str(tenant_id), "driver_id": body["driver_id"], "charger_id": body["charger_id"]}
 
+    @app.get("/charging/session/{session_id}/status")
+    async def status(session_id: str, driver_id: str, tenant_id: uuid.UUID = Depends(require_current_tenant)) -> dict:
+        return {"tenant_id": str(tenant_id), "session_id": session_id, "driver_id": driver_id}
+
+    @app.post("/charging/session/{session_id}/stop")
+    async def stop(session_id: str, body: dict, tenant_id: uuid.UUID = Depends(require_current_tenant)) -> dict:
+        return {"tenant_id": str(tenant_id), "session_id": session_id, "driver_id": body["driver_id"]}
+
     app.add_middleware(TenantContextMiddleware)
     app.add_middleware(GatewaySignatureMiddleware)
     return app
@@ -162,3 +170,37 @@ def test_two_drivers_with_different_tenants_are_forwarded_with_their_own_tenant(
     )
 
     assert response.json()["tenant_id"] == str(other_tenant)
+
+
+def test_status_is_forwarded_with_the_verified_driver_id_as_a_query_param():
+    client = TestClient(_build_edge_app_with_forwarder())
+
+    response = client.get("/charging/session/session-1/status", headers=_auth_header())
+
+    assert response.status_code == 200
+    assert response.json() == {"tenant_id": str(TENANT_ID), "session_id": "session-1", "driver_id": str(DRIVER_ID)}
+
+
+def test_status_requires_a_bearer_token():
+    client = TestClient(_build_edge_app_with_forwarder())
+
+    response = client.get("/charging/session/session-1/status")
+
+    assert response.status_code == 401
+
+
+def test_stop_is_forwarded_with_the_verified_driver_id_in_the_body():
+    client = TestClient(_build_edge_app_with_forwarder())
+
+    response = client.post("/charging/session/session-1/stop", headers=_auth_header())
+
+    assert response.status_code == 200
+    assert response.json() == {"tenant_id": str(TENANT_ID), "session_id": "session-1", "driver_id": str(DRIVER_ID)}
+
+
+def test_stop_requires_a_bearer_token():
+    client = TestClient(_build_edge_app_with_forwarder())
+
+    response = client.post("/charging/session/session-1/stop")
+
+    assert response.status_code == 401

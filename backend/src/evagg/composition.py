@@ -368,6 +368,7 @@ def build_services() -> Services:
         wallet_id_for_driver=lambda driver_id: driver_id,
         command_service=remote_command_service,
         session_charger_map=session_charger_map,
+        transaction_repository=transaction_repository,
     )
 
     connection_manager = ConnectionManager(

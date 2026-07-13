@@ -1,8 +1,13 @@
-"""Forwards driver-authenticated `POST /charging/session/start/*` calls from
-`evagg.edge_app` (where a driver connects, authenticated by their own JWT,
-not a tenant header) to `evagg.main`'s tenant-gated routes, where
-`SessionStartService` actually lives — a separate process in production
-(`backend-main`), reached over real HTTP.
+"""Forwards driver-authenticated `/charging/session/*` calls (start, status,
+stop) from `evagg.edge_app` (where a driver connects, authenticated by
+their own JWT, not a tenant header) to `evagg.main`'s tenant-gated routes,
+where `SessionStartService` actually lives — a separate process in
+production (`backend-main`), reached over real HTTP.
+
+The status/stop routes also always inject the token's own driver_id
+(as a query param / body field respectively) rather than trusting a
+client-supplied one — `SessionStartService` uses it to refuse a driver
+who isn't the one who started that session.
 
 Unlike `evagg.gateway.dev_forwarder` (which trusts whatever tenant id the
 caller declares — acceptable only for local portal dev, standing in for a
@@ -69,9 +74,57 @@ def mount_session_start_forwarder(
             media_type=upstream_response.headers.get("content-type"),
         )
 
+    async def forward_status(
+        session_id: str,
+        identity: DriverIdentity = Depends(require_driver_identity),
+    ) -> Response:
+        upstream_response = await client.get(
+            f"/charging/session/{session_id}/status",
+            params={"driver_id": str(identity.driver_id)},
+            headers={
+                "x-tenant-id": str(identity.tenant_id),
+                SIGNATURE_HEADER: sign_tenant_id(identity.tenant_id),
+            },
+        )
+        return Response(
+            content=upstream_response.content,
+            status_code=upstream_response.status_code,
+            media_type=upstream_response.headers.get("content-type"),
+        )
+
+    async def forward_stop(
+        session_id: str,
+        identity: DriverIdentity = Depends(require_driver_identity),
+    ) -> Response:
+        upstream_response = await client.post(
+            f"/charging/session/{session_id}/stop",
+            json={"driver_id": str(identity.driver_id)},
+            headers={
+                "x-tenant-id": str(identity.tenant_id),
+                SIGNATURE_HEADER: sign_tenant_id(identity.tenant_id),
+            },
+        )
+        return Response(
+            content=upstream_response.content,
+            status_code=upstream_response.status_code,
+            media_type=upstream_response.headers.get("content-type"),
+        )
+
     app.add_api_route(
         "/charging/session/start/{method}",
         forward,
+        methods=["POST"],
+        include_in_schema=False,
+    )
+    app.add_api_route(
+        "/charging/session/{session_id}/status",
+        forward_status,
+        methods=["GET"],
+        include_in_schema=False,
+    )
+    app.add_api_route(
+        "/charging/session/{session_id}/stop",
+        forward_stop,
         methods=["POST"],
         include_in_schema=False,
     )

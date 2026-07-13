@@ -24,7 +24,7 @@ from evagg.billing.stripe_webhook import build_stripe_webhook_router
 from evagg.billing.tariff_router import build_tariff_router
 from evagg.billing.wallet_router import build_wallet_router
 from evagg.carbon.router import build_carbon_router
-from evagg.charging_auth.session_start_router import build_session_start_router
+from evagg.charging_auth.session_start_router import build_session_router, build_session_start_router
 from evagg.composition import build_services, shutdown_services, startup_services
 from evagg.core.config import settings
 from evagg.core.observability import configure_logging, instrument_app
@@ -98,6 +98,7 @@ app.include_router(build_cost_report_router(_cost_report_service))
 app.include_router(
     build_session_start_router(_session_start_service, _autocharge_mac_store, _plug_and_charge_validator)
 )
+app.include_router(build_session_router(_session_start_service))
 app.include_router(build_presence_router(_presence_registry))
 app.include_router(build_command_router(_remote_command_service, _command_log_store))
 

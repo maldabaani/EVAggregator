@@ -9,7 +9,7 @@ from evagg.billing.payment_methods import DIRECT_CARD, InMemoryPaymentMethodStor
 from evagg.charging_auth.autocharge import InMemoryAutochargeMacStore
 from evagg.charging_auth.plug_and_charge import InMemoryEmaidDriverMap, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import sign_qr_token
-from evagg.charging_auth.session_start import SessionStartError, SessionStartService
+from evagg.charging_auth.session_start import SessionNotFoundError, SessionStartError, SessionStartService
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap
 from evagg.ocpp_gateway.commands import (
     CommandOutcome,
@@ -20,6 +20,7 @@ from evagg.ocpp_gateway.commands import (
     RemoteCommandService,
 )
 from evagg.ocpp_gateway.presence import InMemoryPresenceRegistry
+from evagg.ocpp_gateway.transactions import InMemoryTransactionRepository
 from charging_auth.x509_test_helpers import make_ca_cert, make_leaf_cert, pem
 
 SECRET = "shared-gateway-secret"
@@ -38,12 +39,19 @@ async def _mark_online_and_accept(presence, transport, charger_id: str) -> None:
     transport.set_outcome(charger_id, CommandOutcome(CommandStatus.ACCEPTED, {"status": "Accepted"}))
 
 
-def _build_service(payment_methods=None, wallet_id_for_driver=None, command_service=None, session_charger_map=None):
+def _build_service(
+    payment_methods=None,
+    wallet_id_for_driver=None,
+    command_service=None,
+    session_charger_map=None,
+    transaction_repository=None,
+):
     return SessionStartService(
         payment_method_store=payment_methods or InMemoryPaymentMethodStore(),
         wallet_id_for_driver=wallet_id_for_driver or (lambda driver_id: driver_id),
         command_service=command_service or _build_command_service()[0],
         session_charger_map=session_charger_map or InMemorySessionChargerMap(),
+        transaction_repository=transaction_repository or InMemoryTransactionRepository(),
     )
 
 
@@ -159,3 +167,92 @@ async def test_a_rejected_remote_start_command_raises_and_creates_no_binding():
 
     with pytest.raises(SessionStartError):
         await service.start_via_app("CP-005", 1, uuid.uuid4(), TENANT_ID)
+
+
+@pytest.mark.asyncio
+async def test_get_session_status_reports_active_true_once_the_charger_reports_a_transaction():
+    from datetime import datetime, timezone
+
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-006")
+    transaction_repository = InMemoryTransactionRepository()
+    service = _build_service(command_service=command_service, transaction_repository=transaction_repository)
+    driver_id = uuid.uuid4()
+
+    result = await service.start_via_app("CP-006", 1, driver_id, TENANT_ID)
+    status_before = await service.get_session_status(result.session_id, driver_id)
+    assert status_before.active is False
+
+    await transaction_repository.start_transaction(
+        "CP-006", TENANT_ID, 1, result.id_tag, meter_start=0, start_timestamp=datetime.now(timezone.utc)
+    )
+    status_after = await service.get_session_status(result.session_id, driver_id)
+    assert status_after.active is True
+    assert status_after.charger_id == "CP-006"
+    assert status_after.connector_id == 1
+
+
+@pytest.mark.asyncio
+async def test_get_session_status_for_an_unknown_session_raises_not_found():
+    service = _build_service()
+
+    with pytest.raises(SessionNotFoundError):
+        await service.get_session_status("no-such-session", uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_get_session_status_refuses_a_driver_who_is_not_the_session_owner():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-007")
+    service = _build_service(command_service=command_service)
+    owner_id = uuid.uuid4()
+    result = await service.start_via_app("CP-007", 1, owner_id, TENANT_ID)
+
+    with pytest.raises(SessionNotFoundError):
+        await service.get_session_status(result.session_id, uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_stop_session_dispatches_remote_stop_transaction_for_the_active_transaction():
+    from datetime import datetime, timezone
+
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-008")
+    transaction_repository = InMemoryTransactionRepository()
+    service = _build_service(command_service=command_service, transaction_repository=transaction_repository)
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-008", 1, driver_id, TENANT_ID)
+    active_txn = await transaction_repository.start_transaction(
+        "CP-008", TENANT_ID, 1, result.id_tag, meter_start=0, start_timestamp=datetime.now(timezone.utc)
+    )
+
+    await service.stop_session(result.session_id, driver_id, TENANT_ID)
+
+    _node_id, _charger_id, _command_id, command_type, payload, _timeout = transport.calls[-1]
+    assert command_type == "RemoteStopTransaction"
+    assert payload["transactionId"] == str(active_txn.id)
+
+
+@pytest.mark.asyncio
+async def test_stop_session_with_no_active_transaction_raises():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-009")
+    service = _build_service(command_service=command_service)
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-009", 1, driver_id, TENANT_ID)
+    # No StartTransaction.req has arrived from the charger yet — no active transaction to stop.
+
+    with pytest.raises(SessionStartError):
+        await service.stop_session(result.session_id, driver_id, TENANT_ID)
+
+
+@pytest.mark.asyncio
+async def test_stop_session_refuses_a_driver_who_is_not_the_session_owner():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-010")
+    service = _build_service(command_service=command_service)
+    owner_id = uuid.uuid4()
+    result = await service.start_via_app("CP-010", 1, owner_id, TENANT_ID)
+
+    with pytest.raises(SessionNotFoundError):
+        await service.stop_session(result.session_id, uuid.uuid4(), TENANT_ID)

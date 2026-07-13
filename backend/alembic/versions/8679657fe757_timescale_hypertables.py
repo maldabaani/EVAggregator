@@ -93,21 +93,30 @@ def upgrade() -> None:
     bind = op.get_bind()
 
     if not _timescaledb_available(bind):
-        op.execute(f"CREATE VIEW meter_value_hourly AS {_PLAIN_ROLLUP_QUERY}")
+        op.execute(f"CREATE OR REPLACE VIEW meter_value_hourly AS {_PLAIN_ROLLUP_QUERY}")
         return
 
     bind.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
 
+    # `if_not_exists => TRUE` on every TimescaleDB call below: the
+    # `autocommit_block()` further down commits whatever's run before it as
+    # a side effect of leaving the wrapped transaction, so a run that fails
+    # partway through (e.g. on the continuous aggregate step) can leave the
+    # hypertable conversions permanently committed even though Alembic never
+    # marks this migration as applied. Without idempotency, retrying
+    # `alembic upgrade head` after exactly that kind of partial failure then
+    # fails immediately with "table ... is already a hypertable" instead of
+    # picking up where it left off.
     bind.execute(
         text(
             "SELECT create_hypertable('meter_value', 'ts', "
-            "chunk_time_interval => INTERVAL '1 day', migrate_data => TRUE)"
+            "chunk_time_interval => INTERVAL '1 day', migrate_data => TRUE, if_not_exists => TRUE)"
         )
     )
     bind.execute(
         text(
             "SELECT create_hypertable('status_log', 'ts', "
-            "chunk_time_interval => INTERVAL '1 day', migrate_data => TRUE)"
+            "chunk_time_interval => INTERVAL '1 day', migrate_data => TRUE, if_not_exists => TRUE)"
         )
     )
 
@@ -126,7 +135,7 @@ def upgrade() -> None:
     with op.get_context().autocommit_block():
         op.execute(
             f"""
-            CREATE MATERIALIZED VIEW meter_value_hourly
+            CREATE MATERIALIZED VIEW IF NOT EXISTS meter_value_hourly
             WITH (timescaledb.continuous) AS
             {_CONTINUOUS_AGGREGATE_QUERY}
             """
@@ -135,7 +144,7 @@ def upgrade() -> None:
         text(
             "SELECT add_continuous_aggregate_policy('meter_value_hourly', "
             "start_offset => INTERVAL '3 hours', end_offset => INTERVAL '1 hour', "
-            "schedule_interval => INTERVAL '1 hour')"
+            "schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE)"
         )
     )
 

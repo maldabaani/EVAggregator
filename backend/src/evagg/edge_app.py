@@ -1,10 +1,12 @@
-"""FastAPI app entrypoint — the "edge" app for the two trust boundaries that
-are NOT tenant-header-authenticated: OCPI (roaming partners call this
-directly, authenticated by their own OCPI bearer token) and the OCPP
-WebSocket (charge points connect directly, authenticated by their own
-per-charger credential in the handshake). Neither belongs on `evagg.main`,
-which requires a gateway-signed `X-Tenant-Id` header no partner or charge
-point ever sends.
+"""FastAPI app entrypoint — the "edge" app for trust boundaries that are NOT
+tenant-header-authenticated: OCPI (roaming partners call this directly,
+authenticated by their own OCPI bearer token), the OCPP WebSocket (charge
+points connect directly, authenticated by their own per-charger credential
+in the handshake), and driver signup/login (a driver has no tenant yet at
+that point — auth *establishes* their session, so it can't sit behind a
+tenant-header check). None of these belong on `evagg.main`, which requires
+a gateway-signed `X-Tenant-Id` header no partner, charge point, or
+unauthenticated driver ever sends.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from fastapi import FastAPI
 
 from evagg.composition import build_services, shutdown_services, startup_services
 from evagg.core.observability import configure_logging, instrument_app
+from evagg.identity.driver_auth_router import build_driver_auth_router
 from evagg.ocpi.admin_router import build_admin_router
 from evagg.ocpi.router import build_ocpi_router, register_ocpi_exception_handlers
 from evagg.ocpp_gateway.ws_app import build_ocpp_ws_router
@@ -72,6 +75,15 @@ async def _price_list_store():
     return services.price_list_store
 
 
+async def _driver_account_store():
+    return services.driver_account_store
+
+
+async def _driver_refresh_token_store():
+    return services.driver_refresh_token_store
+
+
+app.include_router(build_driver_auth_router(_driver_account_store, _driver_refresh_token_store))
 app.include_router(
     build_ocpi_router(
         _partner_registry, _location_repository, _tariff_catalog, _charging_profile_service, _ocpi_command_service,

@@ -65,6 +65,8 @@ from evagg.core.config import settings
 from evagg.fleet.cost_report import CostReportService
 from evagg.fleet.rollup import InMemoryRollupStore
 from evagg.gateway.rate_limit import RateLimiter, RedisRateLimiter
+from evagg.gateway.refresh_store import InMemoryRefreshTokenStore, RefreshTokenStore
+from evagg.identity.driver_auth import DriverAccountStore, InMemoryDriverAccountStore
 from evagg.ocpi.charging_preferences import ChargingPreferencesService, InMemoryChargingPreferencesStore
 from evagg.ocpi.charging_profiles import (
     ChargingProfileService,
@@ -169,6 +171,9 @@ class Services:
     price_list_store: PriceListStore
     partner_push_client: PartnerPushClient
     session_push_client: SessionPushClient
+
+    driver_account_store: DriverAccountStore
+    driver_refresh_token_store: RefreshTokenStore
 
     presence_registry: PresenceRegistry
     rate_limiter: RateLimiter
@@ -282,6 +287,9 @@ def build_services() -> Services:
     partner_push_client = _build_partner_push_client()
     session_push_client = _build_session_push_client()
 
+    driver_account_store: DriverAccountStore = InMemoryDriverAccountStore()
+    driver_refresh_token_store: RefreshTokenStore = InMemoryRefreshTokenStore()
+
     # --- OCPP gateway (Redis/NATS are real in both modes) -----------------
     presence_registry: PresenceRegistry = RedisPresenceRegistry(redis_client)
     rate_limiter: RateLimiter = RedisRateLimiter(redis_client)
@@ -392,6 +400,8 @@ def build_services() -> Services:
         price_list_store=price_list_store,
         partner_push_client=partner_push_client,
         session_push_client=session_push_client,
+        driver_account_store=driver_account_store,
+        driver_refresh_token_store=driver_refresh_token_store,
         presence_registry=presence_registry,
         rate_limiter=rate_limiter,
         event_bus=event_bus,

@@ -67,6 +67,8 @@ from evagg.fleet.rollup import InMemoryRollupStore
 from evagg.gateway.rate_limit import RateLimiter, RedisRateLimiter
 from evagg.driver_app.reservations import DriverReservationService
 from evagg.driver_app.rewards import InMemoryRewardsStore, RewardsService
+from evagg.driver_app.route_planner import RoutePlanService
+from evagg.driver_app.routing_client import FakeRoutingClient, OsrmRoutingClient, RoutingClient
 from evagg.driver_app.vehicles import InMemoryVehicleStore, VehicleStore
 from evagg.gateway.refresh_store import InMemoryRefreshTokenStore, RefreshTokenStore
 from evagg.identity.driver_auth import DriverAccountStore, InMemoryDriverAccountStore
@@ -181,6 +183,7 @@ class Services:
     driver_refresh_token_store: RefreshTokenStore
     vehicle_store: VehicleStore
     rewards_service: RewardsService
+    route_plan_service: RoutePlanService
 
     presence_registry: PresenceRegistry
     rate_limiter: RateLimiter
@@ -211,6 +214,12 @@ def _build_payment_provider() -> PaymentProvider:
     if settings.app_mode == "production":
         return StripePaymentProvider(api_key=settings.stripe_api_key, base_url=settings.stripe_base_url)
     return StubPaymentProvider()
+
+
+def _build_routing_client() -> RoutingClient:
+    if settings.app_mode == "production":
+        return OsrmRoutingClient(base_url=settings.routing_base_url)
+    return FakeRoutingClient()
 
 
 def _build_carbon_provider() -> CarbonProvider:
@@ -296,6 +305,7 @@ def build_services() -> Services:
     driver_refresh_token_store: RefreshTokenStore = InMemoryRefreshTokenStore()
     vehicle_store: VehicleStore = InMemoryVehicleStore()
     rewards_service = RewardsService(InMemoryRewardsStore())
+    route_plan_service = RoutePlanService(_build_routing_client(), vehicle_store, location_repository)
 
     # --- OCPP gateway (Redis/NATS are real in both modes) -----------------
     presence_registry: PresenceRegistry = RedisPresenceRegistry(redis_client)
@@ -425,6 +435,7 @@ def build_services() -> Services:
         driver_refresh_token_store=driver_refresh_token_store,
         vehicle_store=vehicle_store,
         rewards_service=rewards_service,
+        route_plan_service=route_plan_service,
         presence_registry=presence_registry,
         rate_limiter=rate_limiter,
         event_bus=event_bus,

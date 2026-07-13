@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     ocpi_partner_push_base_url: str = "https://partner.example.com/ocpi"
     ocpi_partner_push_token: str = "dev_only_replace_me"
 
+    # OSRM's free public demo server — no API key needed, unlike the other
+    # integrations above, but rate-limited and not production-grade traffic.
+    # Unused in app_mode=testing (FakeRoutingClient is wired instead). Swap
+    # for a paid provider (Mapbox/HERE/Google) before real launch.
+    routing_base_url: str = "https://router.project-osrm.org"
+
     # This CPO's own OCPI party identity — every OCPI object we publish
     # (Locations, Tariffs, ...) is namespaced under it. Bilateral roaming
     # only (Task 1.3's chosen topology): one party identity is enough, since

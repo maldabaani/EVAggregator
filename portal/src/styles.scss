@@ -22,6 +22,24 @@
   --radius: 10px;
 }
 
+/* Toggled by AppComponent (persisted in localStorage) rather than
+   following the OS preference — an operator console, unlike the
+   artifact/marketing-site convention, so an explicit switch makes more
+   sense than inheriting prefers-color-scheme. */
+:root[data-theme='dark'] {
+  --color-primary: #17c495;
+  --color-primary-dark: #0ba37a;
+  --color-primary-light: #123a30;
+  --color-on-primary: #06120e;
+
+  --color-background: #0f1613;
+  --color-surface: #17211d;
+  --color-text: #e9f3ef;
+  --color-text-muted: #93a39d;
+  --color-border: #2a3833;
+  --color-error: #ff6b60;
+}
+
 * {
   box-sizing: border-box;
 }

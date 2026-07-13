@@ -28,12 +28,30 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _existing_columns(bind) -> set[str]:
+    return {col["name"] for col in sa.inspect(bind).get_columns("charger")}
+
+
 def upgrade() -> None:
-    op.add_column("charger", sa.Column("charge_point_id", sa.String(255), nullable=True))
-    op.execute("UPDATE charger SET charge_point_id = id::text WHERE charge_point_id IS NULL")
-    op.alter_column("charger", "charge_point_id", nullable=False)
-    op.create_unique_constraint("uq_charger_charge_point_id", "charger", ["charge_point_id"])
-    op.create_index("ix_charger_charge_point_id", "charger", ["charge_point_id"])
+    bind = op.get_bind()
+    # Retry-safe against a Postgres volume left in a partially-migrated
+    # state by an earlier failed `alembic upgrade head` run (e.g. one that
+    # got this far before a *later* migration in the chain failed) — see
+    # the timescale hypertables migration's own idempotency note for the
+    # same underlying class of problem.
+    if "charge_point_id" not in _existing_columns(bind):
+        op.add_column("charger", sa.Column("charge_point_id", sa.String(255), nullable=True))
+        op.execute("UPDATE charger SET charge_point_id = id::text WHERE charge_point_id IS NULL")
+        op.alter_column("charger", "charge_point_id", nullable=False)
+
+    inspector = sa.inspect(bind)
+    existing_constraints = {c["name"] for c in inspector.get_unique_constraints("charger")}
+    if "uq_charger_charge_point_id" not in existing_constraints:
+        op.create_unique_constraint("uq_charger_charge_point_id", "charger", ["charge_point_id"])
+
+    existing_indexes = {i["name"] for i in inspector.get_indexes("charger")}
+    if "ix_charger_charge_point_id" not in existing_indexes:
+        op.create_index("ix_charger_charge_point_id", "charger", ["charge_point_id"])
 
 
 def downgrade() -> None:

@@ -270,12 +270,9 @@ def build_services() -> Services:
     plug_and_charge_validator = PlugAndChargeValidator(
         trusted_ca_certs_pem=[], emaid_map=InMemoryEmaidDriverMap(), ocsp_checker=_build_ocsp_checker()
     )
-    session_start_service = SessionStartService(
-        payment_method_store=InMemoryPaymentMethodStore(),
-        # No driver->wallet mapping table exists yet (see module docstring on
-        # persistence); identity mapping is a testing-mode simplification.
-        wallet_id_for_driver=lambda driver_id: driver_id,
-    )
+    # session_start_service is constructed further below, once
+    # remote_command_service and session_charger_map (both needed to
+    # actually dispatch RemoteStartTransaction) exist.
 
     # --- OCPI --------------------------------------------------------
     location_repository = InMemoryLocationRepository()
@@ -363,6 +360,14 @@ def build_services() -> Services:
     charging_preferences_service = ChargingPreferencesService(
         session_charger_map=session_charger_map,
         store=InMemoryChargingPreferencesStore(),
+    )
+    session_start_service = SessionStartService(
+        payment_method_store=InMemoryPaymentMethodStore(),
+        # No driver->wallet mapping table exists yet (see module docstring on
+        # persistence); identity mapping is a testing-mode simplification.
+        wallet_id_for_driver=lambda driver_id: driver_id,
+        command_service=remote_command_service,
+        session_charger_map=session_charger_map,
     )
 
     connection_manager = ConnectionManager(

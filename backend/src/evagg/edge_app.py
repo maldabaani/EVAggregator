@@ -16,8 +16,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from evagg.composition import build_services, shutdown_services, startup_services
+from evagg.core.config import settings
 from evagg.core.observability import configure_logging, instrument_app
 from evagg.driver_app.map_router import build_map_router
+from evagg.driver_app.session_start_forwarder import mount_session_start_forwarder
 from evagg.driver_app.vehicle_router import build_vehicle_router
 from evagg.identity.driver_auth_router import build_driver_auth_router
 from evagg.ocpi.admin_router import build_admin_router
@@ -92,6 +94,7 @@ async def _vehicle_store():
 app.include_router(build_driver_auth_router(_driver_account_store, _driver_refresh_token_store))
 app.include_router(build_map_router(_location_repository))
 app.include_router(build_vehicle_router(_vehicle_store))
+mount_session_start_forwarder(app, settings.internal_services_base_url)
 app.include_router(
     build_ocpi_router(
         _partner_registry, _location_repository, _tariff_catalog, _charging_profile_service, _ocpi_command_service,

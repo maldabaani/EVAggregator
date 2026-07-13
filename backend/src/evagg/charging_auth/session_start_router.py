@@ -1,12 +1,14 @@
-"""POST /charging/session/start/{qr,autocharge,plug-and-charge} — the first
-real HTTP entry point onto `SessionStartService` (Task 5.2), which existed
-as a tested service with no router mounting it anywhere.
+"""POST /charging/session/start/{qr,autocharge,plug-and-charge,app} — the
+real HTTP entry point onto `SessionStartService` (Task 5.2): resolves *who*
+is starting a session and *how they'll pay*, then actually dispatches the
+OCPP `RemoteStartTransaction` command to the charge point (Task 2.3's
+outbound command engine) and records the resulting session_id.
 
-Resolves *who* is starting a session and *how they'll pay*; it does not
-itself dispatch the OCPP RemoteStartTransaction command to the charge point
-(that's the outbound command engine, Task 2.3, which a connected charger
-reaches over `evagg.ocpp_gateway.ws_app` — wiring this endpoint's result
-into that dispatch is a follow-up, not covered here).
+Sits behind `evagg.main`'s tenant-header trust boundary — `tenant_id` comes
+from the gateway-signed header (via `require_current_tenant`), the same as
+every other route here. For the `app` method specifically, the driver
+reaches this through `evagg.driver_app.session_start_forwarder`, which
+signs that header from the driver's own verified access token.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from pydantic import BaseModel
 from evagg.charging_auth.autocharge import AutochargeMacStore
 from evagg.charging_auth.plug_and_charge import PlugAndChargeValidator
 from evagg.charging_auth.session_start import SessionStartError, SessionStartResult, SessionStartService
+from evagg.core.tenancy import require_current_tenant
 
 
 class QrStartRequest(BaseModel):
@@ -37,8 +40,15 @@ class PlugAndChargeStartRequest(BaseModel):
     charger_id: str
 
 
+class AppStartRequest(BaseModel):
+    charger_id: str
+    connector_id: int
+    driver_id: str
+
+
 def _result_dict(result: SessionStartResult) -> dict:
     return {
+        "session_id": result.session_id,
         "driver_id": str(result.driver_id),
         "charger_id": result.charger_id,
         "connector_id": result.connector_id,
@@ -60,9 +70,13 @@ def build_session_start_router(
     router = APIRouter(prefix="/charging/session/start", tags=["charging-session"])
 
     @router.post("/qr")
-    async def start_via_qr(body: QrStartRequest, service: SessionStartService = Depends(service_dependency)) -> dict:
+    async def start_via_qr(
+        body: QrStartRequest,
+        service: SessionStartService = Depends(service_dependency),
+        tenant_id: uuid.UUID = Depends(require_current_tenant),
+    ) -> dict:
         try:
-            result = await service.start_via_qr(body.token, uuid.UUID(body.driver_id), body.secret)
+            result = await service.start_via_qr(body.token, uuid.UUID(body.driver_id), body.secret, tenant_id)
         except SessionStartError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _result_dict(result)
@@ -72,9 +86,10 @@ def build_session_start_router(
         body: AutochargeStartRequest,
         service: SessionStartService = Depends(service_dependency),
         mac_store: AutochargeMacStore = Depends(mac_store_dependency),
+        tenant_id: uuid.UUID = Depends(require_current_tenant),
     ) -> dict:
         try:
-            result = await service.start_via_autocharge(body.mac_address, body.charger_id, mac_store)
+            result = await service.start_via_autocharge(body.mac_address, body.charger_id, tenant_id, mac_store)
         except SessionStartError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _result_dict(result)
@@ -84,9 +99,24 @@ def build_session_start_router(
         body: PlugAndChargeStartRequest,
         service: SessionStartService = Depends(service_dependency),
         validator: PlugAndChargeValidator = Depends(plug_and_charge_validator_dependency),
+        tenant_id: uuid.UUID = Depends(require_current_tenant),
     ) -> dict:
         try:
-            result = await service.start_via_plug_and_charge(body.cert_pem, body.charger_id, validator)
+            result = await service.start_via_plug_and_charge(body.cert_pem, body.charger_id, tenant_id, validator)
+        except SessionStartError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _result_dict(result)
+
+    @router.post("/app")
+    async def start_via_app(
+        body: AppStartRequest,
+        service: SessionStartService = Depends(service_dependency),
+        tenant_id: uuid.UUID = Depends(require_current_tenant),
+    ) -> dict:
+        try:
+            result = await service.start_via_app(
+                body.charger_id, body.connector_id, uuid.UUID(body.driver_id), tenant_id
+            )
         except SessionStartError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _result_dict(result)

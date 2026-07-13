@@ -9,7 +9,14 @@ from evagg.billing.payment_methods import DIRECT_CARD, InMemoryPaymentMethodStor
 from evagg.charging_auth.autocharge import InMemoryAutochargeMacStore
 from evagg.charging_auth.plug_and_charge import InMemoryEmaidDriverMap, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import sign_qr_token
-from evagg.charging_auth.session_start import SessionNotFoundError, SessionStartError, SessionStartService
+from evagg.billing.tariffs import InMemoryTariffStore, InMemoryTenantCurrencyProvider, TariffService
+from evagg.charging_auth.session_start import (
+    ENERGY_MEASURAND,
+    POWER_MEASURAND,
+    SessionNotFoundError,
+    SessionStartError,
+    SessionStartService,
+)
 from evagg.driver_app.rewards import InMemoryRewardsStore, RewardsService
 from evagg.driver_app.vehicles import InMemoryVehicleStore
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap
@@ -21,6 +28,8 @@ from evagg.ocpp_gateway.commands import (
     InMemoryFirmwareUpdateStore,
     RemoteCommandService,
 )
+from evagg.ocpp_gateway.live_meter_readings import InMemoryLatestMeterReadingStore
+from evagg.ocpp_gateway.meter_values import MeterReading
 from evagg.ocpp_gateway.presence import InMemoryPresenceRegistry
 from evagg.ocpp_gateway.transactions import InMemoryTransactionRepository
 from charging_auth.x509_test_helpers import make_ca_cert, make_leaf_cert, pem
@@ -49,6 +58,8 @@ def _build_service(
     transaction_repository=None,
     vehicle_store=None,
     rewards_service=None,
+    latest_meter_readings=None,
+    tariff_service=None,
 ):
     return SessionStartService(
         payment_method_store=payment_methods or InMemoryPaymentMethodStore(),
@@ -58,6 +69,8 @@ def _build_service(
         transaction_repository=transaction_repository or InMemoryTransactionRepository(),
         vehicle_store=vehicle_store or InMemoryVehicleStore(),
         rewards_service=rewards_service or RewardsService(InMemoryRewardsStore()),
+        latest_meter_readings=latest_meter_readings or InMemoryLatestMeterReadingStore(),
+        tariff_service=tariff_service or TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider()),
     )
 
 
@@ -387,3 +400,111 @@ async def test_a_failed_stop_does_not_award_points():
         await service.stop_session(result.session_id, driver_id, TENANT_ID)
 
     assert await rewards_service.get_balance(driver_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_live_status_reports_real_energy_and_power_from_meter_values():
+    from datetime import datetime, timezone
+
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-018")
+    transaction_repository = InMemoryTransactionRepository()
+    latest_meter_readings = InMemoryLatestMeterReadingStore()
+    service = _build_service(
+        command_service=command_service, transaction_repository=transaction_repository,
+        latest_meter_readings=latest_meter_readings,
+    )
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-018", 1, driver_id, TENANT_ID)
+    txn = await transaction_repository.start_transaction(
+        "CP-018", TENANT_ID, 1, result.id_tag, meter_start=0, start_timestamp=datetime.now(timezone.utc)
+    )
+    ts = datetime.now(timezone.utc)
+    await latest_meter_readings.update(
+        MeterReading(TENANT_ID, txn.id, "CP-018", ts, ENERGY_MEASURAND, 4.2, "kWh")
+    )
+    await latest_meter_readings.update(
+        MeterReading(TENANT_ID, txn.id, "CP-018", ts, POWER_MEASURAND, 7.5, "kW")
+    )
+
+    status = await service.get_live_status(result.session_id, driver_id, TENANT_ID)
+
+    assert status.status == "charging"
+    assert status.energy_kwh == 4.2
+    assert status.power_kw == 7.5
+
+
+@pytest.mark.asyncio
+async def test_live_status_with_no_meter_values_yet_reports_zero():
+    from datetime import datetime, timezone
+
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-019")
+    transaction_repository = InMemoryTransactionRepository()
+    service = _build_service(command_service=command_service, transaction_repository=transaction_repository)
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-019", 1, driver_id, TENANT_ID)
+    await transaction_repository.start_transaction(
+        "CP-019", TENANT_ID, 1, result.id_tag, meter_start=0, start_timestamp=datetime.now(timezone.utc)
+    )
+
+    status = await service.get_live_status(result.session_id, driver_id, TENANT_ID)
+
+    assert status.energy_kwh == 0.0
+    assert status.power_kw == 0.0
+    assert status.cost_minor_units == 0
+
+
+@pytest.mark.asyncio
+async def test_live_status_computes_cost_from_the_tenants_tariff():
+    from datetime import datetime, timezone
+
+    from evagg.billing.tariff_calculator import TariffComponentInput
+
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-020")
+    transaction_repository = InMemoryTransactionRepository()
+    latest_meter_readings = InMemoryLatestMeterReadingStore()
+    tariff_service = TariffService(InMemoryTariffStore(), InMemoryTenantCurrencyProvider())
+    tariff = await tariff_service.create_tariff(
+        TENANT_ID, "Standard", [TariffComponentInput(type="energy", price_minor_units=100, step_size=1)]
+    )
+    service = _build_service(
+        command_service=command_service, transaction_repository=transaction_repository,
+        latest_meter_readings=latest_meter_readings, tariff_service=tariff_service,
+    )
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-020", 1, driver_id, TENANT_ID)
+    txn = await transaction_repository.start_transaction(
+        "CP-020", TENANT_ID, 1, result.id_tag, meter_start=0, start_timestamp=datetime.now(timezone.utc)
+    )
+    await latest_meter_readings.update(
+        MeterReading(TENANT_ID, txn.id, "CP-020", datetime.now(timezone.utc), ENERGY_MEASURAND, 3.0, "kWh")
+    )
+
+    status = await service.get_live_status(result.session_id, driver_id, TENANT_ID)
+
+    assert status.cost_minor_units == 300  # 3 kWh * 100 minor units/kWh
+    assert status.currency == tariff.currency
+
+
+@pytest.mark.asyncio
+async def test_live_status_for_a_finished_session_reports_finished():
+    command_service, presence, transport = _build_command_service()
+    await _mark_online_and_accept(presence, transport, "CP-021")
+    service = _build_service(command_service=command_service)
+    driver_id = uuid.uuid4()
+    result = await service.start_via_app("CP-021", 1, driver_id, TENANT_ID)
+    # No StartTransaction.req arrived, so there's no active transaction.
+
+    status = await service.get_live_status(result.session_id, driver_id, TENANT_ID)
+
+    assert status.status == "finished"
+
+
+@pytest.mark.asyncio
+async def test_live_status_for_an_unowned_or_unknown_session_raises():
+    service = _build_service()
+
+    with pytest.raises(SessionNotFoundError):
+        await service.get_live_status("bogus-session-id", uuid.uuid4(), TENANT_ID)

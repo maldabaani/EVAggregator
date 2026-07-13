@@ -26,9 +26,11 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable
 
 from evagg.billing.payment_methods import PaymentMethod, PaymentMethodStore
+from evagg.billing.tariffs import TariffService
 from evagg.charging_auth.autocharge import AutochargeMacStore, synthesize_id_tag_for_mac
 from evagg.charging_auth.plug_and_charge import PlugAndChargeError, PlugAndChargeValidator
 from evagg.charging_auth.qr_token import QrTokenError, verify_qr_token
@@ -36,7 +38,16 @@ from evagg.driver_app.rewards import RewardsService
 from evagg.driver_app.vehicles import VehicleStore
 from evagg.ocpi.charging_profiles import InMemorySessionChargerMap, SessionChargerBinding
 from evagg.ocpp_gateway.commands import ChargerOfflineError, CommandStatus, RemoteCommandService
+from evagg.ocpp_gateway.live_meter_readings import LatestMeterReadingStore
 from evagg.ocpp_gateway.transactions import TransactionRepository
+
+ENERGY_MEASURAND = "Energy.Active.Import.Register"
+POWER_MEASURAND = "Power.Active.Import"
+# Used only when the tenant has no tariff to price the live estimate
+# against — matches the mobile app's own existing AED convention
+# (wallet_screen.dart/insights_screen.dart) for the same reason: the
+# backend has nothing else to report a currency as in that case.
+DEFAULT_LIVE_STATUS_CURRENCY = "AED"
 
 
 class SessionStartError(Exception):
@@ -68,6 +79,17 @@ class SessionStatus:
     active: bool
 
 
+@dataclass(frozen=True)
+class LiveSessionStatus:
+    status: str  # 'charging' | 'finished'
+    energy_kwh: float
+    power_kw: float
+    cost_minor_units: int
+    currency: str
+    started_at: datetime
+    updated_at: datetime
+
+
 def synthesize_id_tag_for_driver(driver_id: uuid.UUID) -> str:
     return f"DRIVER:{driver_id}"
 
@@ -82,6 +104,8 @@ class SessionStartService:
         transaction_repository: TransactionRepository,
         vehicle_store: VehicleStore,
         rewards_service: RewardsService,
+        latest_meter_readings: LatestMeterReadingStore,
+        tariff_service: TariffService,
     ) -> None:
         self._payment_method_store = payment_method_store
         self._wallet_id_for_driver = wallet_id_for_driver
@@ -90,6 +114,8 @@ class SessionStartService:
         self._transaction_repository = transaction_repository
         self._vehicle_store = vehicle_store
         self._rewards_service = rewards_service
+        self._latest_meter_readings = latest_meter_readings
+        self._tariff_service = tariff_service
         # Tracks which driver started each session, regardless of auth
         # method, so status/stop can refuse a driver who isn't the one who
         # started it — without this, guessing or observing another
@@ -153,6 +179,54 @@ class SessionStartService:
         active_transaction = await self._transaction_repository.get_active_transaction(binding.charger_id)
         return SessionStatus(
             charger_id=binding.charger_id, connector_id=binding.connector_id, active=active_transaction is not None
+        )
+
+    async def get_live_status(self, session_id: str, driver_id: uuid.UUID, tenant_id: uuid.UUID) -> LiveSessionStatus:
+        """Real energy (kWh) and power (kW) come from the charger's own
+        MeterValues, not a fabricated estimate. Cost is a live *estimate*
+        only: there's no charger-to-tariff assignment anywhere in this
+        system yet (see `evagg.billing.pricing_resolution`'s override
+        chain, which resolves a tariff *given* a site/operator id — nothing
+        maps a charger to one) — so this uses the tenant's first tariff, if
+        it has any, the same kind of documented stand-in as
+        `wallet_id_for_driver` above. The definitive settled cost still
+        comes from `SessionBillingService.charge_session`'s caller-supplied
+        amount, not from this estimate.
+        """
+        binding = await self._owned_binding(session_id, driver_id)
+        active_transaction = await self._transaction_repository.get_active_transaction(binding.charger_id)
+
+        now = datetime.now(timezone.utc)
+        if active_transaction is None:
+            # No signal for exactly when it stopped is kept here — this
+            # only reports "it's over", matching `SessionStatus.finished`
+            # on the mobile side, which has no separate "just now" state.
+            return LiveSessionStatus(
+                status="finished", energy_kwh=0.0, power_kw=0.0, cost_minor_units=0,
+                currency=DEFAULT_LIVE_STATUS_CURRENCY, started_at=now, updated_at=now,
+            )
+
+        transaction_id = active_transaction.id
+        energy_reading = await self._latest_meter_readings.get_latest(transaction_id, ENERGY_MEASURAND)
+        power_reading = await self._latest_meter_readings.get_latest(transaction_id, POWER_MEASURAND)
+        energy_kwh = energy_reading.value if energy_reading is not None else 0.0
+        power_kw = power_reading.value if power_reading is not None else 0.0
+        updated_at = max((r.ts for r in (energy_reading, power_reading) if r is not None), default=now)
+
+        started_at = active_transaction.start_timestamp
+        duration_minutes = max(0.0, (now - started_at).total_seconds() / 60)
+
+        cost_minor_units = 0
+        currency = DEFAULT_LIVE_STATUS_CURRENCY
+        tenant_tariffs = [t for t in await self._tariff_service.list_all_tariffs() if t.tenant_id == tenant_id]
+        if tenant_tariffs:
+            tariff = tenant_tariffs[0]
+            cost_minor_units = await self._tariff_service.preview(tariff.id, duration_minutes, energy_kwh)
+            currency = tariff.currency
+
+        return LiveSessionStatus(
+            status="charging", energy_kwh=energy_kwh, power_kw=power_kw, cost_minor_units=cost_minor_units,
+            currency=currency, started_at=started_at, updated_at=updated_at,
         )
 
     async def stop_session(self, session_id: str, driver_id: uuid.UUID, tenant_id: uuid.UUID) -> None:

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from evagg.ocpp_gateway.authorize import AuthStatus, Authorizer
 from evagg.ocpp_gateway.connectors import ConnectorStore
 from evagg.ocpp_gateway.events import EventPublisher
+from evagg.ocpp_gateway.live_meter_readings import LatestMeterReadingStore
 from evagg.ocpp_gateway.meter_values import MeterReading, MeterValueBuffer
 from evagg.ocpp_gateway.registration import ChargerRegistry
 from evagg.ocpp_gateway.transactions import ActiveTransaction, StopResult, TransactionRepository
@@ -55,6 +56,7 @@ class OcppMessageHandlers:
         events: EventPublisher,
         default_heartbeat_interval_seconds: int = 300,
         firmware_update_store: "FirmwareUpdateStore | None" = None,
+        latest_meter_readings: LatestMeterReadingStore | None = None,
     ) -> None:
         self._charger_registry = charger_registry
         self._connector_store = connector_store
@@ -67,6 +69,11 @@ class OcppMessageHandlers:
         # without it, it just can't also update Task 2.3's FirmwareUpdateStore
         # (kept optional so Task 2.2's tests don't need Task 2.3's module).
         self._firmware_update_store = firmware_update_store
+        # Optional for the same reason: without it, MeterValues still
+        # buffers durably for storage, it just can't also serve a live
+        # "energy/power right now" read (see driver_app's live session
+        # status, which needs this).
+        self._latest_meter_readings = latest_meter_readings
 
     async def handle_boot_notification(
         self,
@@ -136,17 +143,18 @@ class OcppMessageHandlers:
         """`readings` is a list of (measurand, value, unit) tuples — one
         MeterValues frame typically carries several sampled values."""
         for measurand, value, unit in readings:
-            await self._meter_values.add(
-                MeterReading(
-                    tenant_id=tenant_id,
-                    transaction_id=transaction_id,
-                    charger_id=charger_id,
-                    ts=ts,
-                    measurand=measurand,
-                    value=value,
-                    unit=unit,
-                )
+            reading = MeterReading(
+                tenant_id=tenant_id,
+                transaction_id=transaction_id,
+                charger_id=charger_id,
+                ts=ts,
+                measurand=measurand,
+                value=value,
+                unit=unit,
             )
+            await self._meter_values.add(reading)
+            if self._latest_meter_readings is not None:
+                await self._latest_meter_readings.update(reading)
 
     async def handle_data_transfer(
         self, charger_id: str, tenant_id: uuid.UUID, vendor_id: str, message_id: str | None, data: str | None

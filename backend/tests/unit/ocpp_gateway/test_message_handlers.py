@@ -204,6 +204,36 @@ async def test_meter_values_batched_write_flushes_on_time_threshold():
 
 
 @pytest.mark.asyncio
+async def test_meter_values_update_the_latest_reading_store_immediately():
+    """Unlike the durable buffer (batched, flushes on size/time thresholds
+    above), the latest-reading store must reflect a new reading right
+    away — a live session status read can't wait for a flush."""
+    from evagg.ocpp_gateway.live_meter_readings import InMemoryLatestMeterReadingStore
+
+    charger_registry = InMemoryChargerRegistry()
+    connector_store = InMemoryConnectorStore()
+    authorizer = Authorizer(InMemoryLocalIdTagStore(), InMemoryRoamingTokenChecker())
+    transactions = InMemoryTransactionRepository()
+    buffer = MeterValueBuffer(InMemoryMeterValueSink(), max_batch_size=50, flush_interval_seconds=1000)
+    events = InMemoryEventPublisher()
+    latest_meter_readings = InMemoryLatestMeterReadingStore()
+    handlers = OcppMessageHandlers(
+        charger_registry, connector_store, authorizer, transactions, buffer, events,
+        latest_meter_readings=latest_meter_readings,
+    )
+    ts = datetime.now(timezone.utc)
+    txn_id = uuid.uuid4()
+
+    await handlers.handle_meter_values(TENANT_ID, txn_id, CHARGER_ID, ts, [("Energy.Active.Import.Register", 1.0, "kWh")])
+    await handlers.handle_meter_values(TENANT_ID, txn_id, CHARGER_ID, ts, [("Energy.Active.Import.Register", 2.0, "kWh")])
+
+    latest = await latest_meter_readings.get_latest(txn_id, "Energy.Active.Import.Register")
+
+    assert latest is not None
+    assert latest.value == 2.0
+
+
+@pytest.mark.asyncio
 async def test_stop_transaction_flushes_trailing_meter_values():
     handlers, _, _, local_store, _, _, sink, buffer, _ = _build_handlers(max_batch_size=50, flush_interval_seconds=1000)
     local_store.set_status("TAG-1", AuthStatus.ACCEPTED)

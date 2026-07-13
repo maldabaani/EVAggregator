@@ -92,6 +92,24 @@ def mount_session_start_forwarder(
             media_type=upstream_response.headers.get("content-type"),
         )
 
+    async def forward_live(
+        session_id: str,
+        identity: DriverIdentity = Depends(require_driver_identity),
+    ) -> Response:
+        upstream_response = await client.get(
+            f"/charging/session/{session_id}/live",
+            params={"driver_id": str(identity.driver_id)},
+            headers={
+                "x-tenant-id": str(identity.tenant_id),
+                SIGNATURE_HEADER: sign_tenant_id(identity.tenant_id),
+            },
+        )
+        return Response(
+            content=upstream_response.content,
+            status_code=upstream_response.status_code,
+            media_type=upstream_response.headers.get("content-type"),
+        )
+
     async def forward_stop(
         session_id: str,
         identity: DriverIdentity = Depends(require_driver_identity),
@@ -119,6 +137,12 @@ def mount_session_start_forwarder(
     app.add_api_route(
         "/charging/session/{session_id}/status",
         forward_status,
+        methods=["GET"],
+        include_in_schema=False,
+    )
+    app.add_api_route(
+        "/charging/session/{session_id}/live",
+        forward_live,
         methods=["GET"],
         include_in_schema=False,
     )

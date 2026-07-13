@@ -145,7 +145,8 @@ class SupabaseTransactionRepository:
         if row is None:
             return None
         return ActiveTransaction(
-            id=uuid.UUID(row["id"]), charger_id=charger_id, connector_id=row["connector_id"], id_tag=row["id_tag"]
+            id=uuid.UUID(row["id"]), charger_id=charger_id, connector_id=row["connector_id"], id_tag=row["id_tag"],
+            start_timestamp=datetime.fromisoformat(row["start_timestamp"]),
         )
 
     async def start_transaction(
@@ -171,7 +172,8 @@ class SupabaseTransactionRepository:
             },
         )
         return ActiveTransaction(
-            id=uuid.UUID(row["id"]), charger_id=charger_id, connector_id=connector_id, id_tag=id_tag
+            id=uuid.UUID(row["id"]), charger_id=charger_id, connector_id=connector_id, id_tag=id_tag,
+            start_timestamp=start_timestamp,
         )
 
     async def stop_transaction(

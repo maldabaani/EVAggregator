@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from evagg.charging_auth.autocharge import AutochargeMacStore
 from evagg.charging_auth.plug_and_charge import PlugAndChargeValidator
 from evagg.charging_auth.session_start import (
+    LiveSessionStatus,
     SessionNotFoundError,
     SessionStartError,
     SessionStartResult,
@@ -58,6 +59,18 @@ class StopSessionRequest(BaseModel):
 
 def _status_dict(status: SessionStatus) -> dict:
     return {"charger_id": status.charger_id, "connector_id": status.connector_id, "active": status.active}
+
+
+def _live_status_dict(status: LiveSessionStatus) -> dict:
+    return {
+        "status": status.status,
+        "energy_kwh": status.energy_kwh,
+        "power_kw": status.power_kw,
+        "cost_minor_units": status.cost_minor_units,
+        "currency": status.currency,
+        "started_at": status.started_at.isoformat(),
+        "updated_at": status.updated_at.isoformat(),
+    }
 
 
 def _result_dict(result: SessionStartResult) -> dict:
@@ -155,6 +168,19 @@ def build_session_router(service_dependency) -> APIRouter:
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="session not found") from exc
         return _status_dict(status)
+
+    @router.get("/{session_id}/live")
+    async def get_live_status(
+        session_id: str,
+        driver_id: uuid.UUID,
+        service: SessionStartService = Depends(service_dependency),
+        tenant_id: uuid.UUID = Depends(require_current_tenant),
+    ) -> dict:
+        try:
+            status = await service.get_live_status(session_id, driver_id, tenant_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="session not found") from exc
+        return _live_status_dict(status)
 
     @router.post("/{session_id}/stop")
     async def stop_session(

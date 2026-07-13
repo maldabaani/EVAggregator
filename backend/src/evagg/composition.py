@@ -100,6 +100,7 @@ from evagg.ocpp_gateway.credentials import CredentialVerifier, InMemoryCredentia
 from evagg.ocpp_gateway.event_bus import NatsEventBus
 from evagg.ocpp_gateway.bus_event_publisher import BusEventPublisher
 from evagg.ocpp_gateway.message_handlers import OcppMessageHandlers
+from evagg.ocpp_gateway.live_meter_readings import InMemoryLatestMeterReadingStore, LatestMeterReadingStore
 from evagg.ocpp_gateway.meter_values import InMemoryMeterValueSink, MeterValueBuffer, MeterValueSink
 from evagg.ocpp_gateway.nats_command_transport import NatsCommandTransport, serve_commands
 from evagg.ocpp_gateway.presence import PresenceRegistry, RedisPresenceRegistry
@@ -344,6 +345,7 @@ def build_services() -> Services:
         connector_store = InMemoryConnectorStore()
         meter_value_sink = InMemoryMeterValueSink()
     meter_value_buffer = MeterValueBuffer(sink=meter_value_sink)
+    latest_meter_readings: LatestMeterReadingStore = InMemoryLatestMeterReadingStore()
     local_id_tag_store = InMemoryLocalIdTagStore()
     if settings.app_mode == "testing":
         # Same demo-seed rationale as the credential above — nothing else
@@ -389,6 +391,8 @@ def build_services() -> Services:
         transaction_repository=transaction_repository,
         vehicle_store=vehicle_store,
         rewards_service=rewards_service,
+        latest_meter_readings=latest_meter_readings,
+        tariff_service=tariff_service,
     )
 
     connection_manager = ConnectionManager(
@@ -408,6 +412,7 @@ def build_services() -> Services:
         meter_value_buffer=meter_value_buffer,
         events=event_publisher,
         firmware_update_store=firmware_update_store,
+        latest_meter_readings=latest_meter_readings,
     )
 
     return Services(

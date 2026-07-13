@@ -10,8 +10,8 @@ close-out or a second downstream event.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Protocol
 
 
@@ -21,6 +21,10 @@ class ActiveTransaction:
     charger_id: str
     connector_id: int
     id_tag: str
+    # Additive field for live session status (elapsed time) — defaulted so
+    # the existing Supabase/test call sites that don't yet supply it keep
+    # working unchanged.
+    start_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -82,7 +86,10 @@ class InMemoryTransactionRepository:
         start_timestamp: datetime,
     ) -> ActiveTransaction:
         transaction_id = uuid.uuid4()
-        txn = ActiveTransaction(id=transaction_id, charger_id=charger_id, connector_id=connector_id, id_tag=id_tag)
+        txn = ActiveTransaction(
+            id=transaction_id, charger_id=charger_id, connector_id=connector_id, id_tag=id_tag,
+            start_timestamp=start_timestamp,
+        )
         self._active[charger_id] = txn
         self._records[transaction_id] = {
             "status": "active",

@@ -89,6 +89,7 @@ services:
       - "4200:80"
     depends_on:
       - backend-main
+      - backend-edge
 
 volumes:
   pgdata:

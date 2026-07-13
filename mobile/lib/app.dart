@@ -5,6 +5,7 @@ import 'core/api/api_client.dart';
 import 'core/api/driver_api.dart';
 import 'core/auth/auth_session.dart';
 import 'core/live_activity/live_activity_controller.dart';
+import 'core/theme/app_theme.dart';
 import 'features/account/account_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
@@ -41,7 +42,7 @@ class _EvAggregatorAppState extends State<EvAggregatorApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'EV Aggregator',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal), useMaterial3: true),
+      theme: AppTheme.light,
       home: AnimatedBuilder(
         animation: widget.authSession,
         builder: (context, _) {

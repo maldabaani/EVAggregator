@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for every real network call this app makes: driver auth,
+         the charger map/vehicle API, and (already, before this) the map's
+         OpenStreetMap tile fetches — without it every request fails with a
+         SecurityException rather than reaching the network at all. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="evagg_driver"
         android:name="${applicationName}"
